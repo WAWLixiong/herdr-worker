@@ -87,7 +87,7 @@ command = ["herdr-worker", "sync"]       #        worktree.opened / worktree.rem
 ```
 <repo>/
 └── .herdr-worker/
-    ├── board.md          # 板级配置：columns（列名/顺序/隐藏）、branch_prefix、default_agent
+    ├── board.md          # 板级配置：columns（列名/顺序/隐藏）、branch_prefix、default_agent、diff_tool
     └── tasks/
         └── 0042-fix-login/
             ├── task.md

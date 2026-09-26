@@ -477,14 +477,15 @@ pub fn open_diff(board_root: &Path, task_id: u32) -> Result<()> {
         })
         .ok_or_else(|| anyhow::anyhow!("worktree list 里找不到 workspace {ws}（可能已清理）"))?;
 
-    // 渲染器探测与输出交给 diff 子命令（它捕获 git 输出直出 + 时间窗驻留，
-    // 不依赖本机 pager——less 在裸 Windows 上常缺失）；这里只传 worktree 路径
+    // 渲染器探测与输出交给 diff 子命令（读 board.md 的 diff_tool 配置）；
+    // 这里传 worktree 路径与板根
     herdr_json(&[
         "plugin", "pane", "open",
         "--plugin", "herdr-worker",
         "--entrypoint", "diff",
         "--placement", "overlay",
         "--env", &format!("HW_DIFF_DIR={path}"),
+        "--env", &format!("HW_BOARD_ROOT={}", board_root.display()),
     ])?;
     Ok(())
 }

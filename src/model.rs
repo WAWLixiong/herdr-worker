@@ -21,6 +21,8 @@ pub struct Board {
     pub columns: Vec<(String, bool)>,
     pub branch_prefix: String,
     pub default_agent: String,
+    /// diff 渲染工具：auto（探测 delta→difft→纯文本）| none | 指定命令名
+    pub diff_tool: String,
     pub tasks: Vec<Task>,
 }
 
@@ -158,6 +160,7 @@ pub fn load_board(root: &Path) -> Result<Board> {
         .collect();
     let mut branch_prefix = "hw".to_string();
     let mut default_agent = "claude-code".to_string();
+    let mut diff_tool = "auto".to_string();
 
     let board_md = root.join("board.md");
     if board_md.is_file() {
@@ -182,6 +185,9 @@ pub fn load_board(root: &Path) -> Result<Board> {
             }
             if let Some(a) = m.str("default_agent") {
                 default_agent = a.to_string();
+            }
+            if let Some(t) = m.str("diff_tool") {
+                diff_tool = t.to_string();
             }
         }
     }
@@ -210,6 +216,7 @@ pub fn load_board(root: &Path) -> Result<Board> {
         columns,
         branch_prefix,
         default_agent,
+        diff_tool,
         tasks,
     })
 }
@@ -396,7 +403,7 @@ mod tests {
         let root = temp_root("full");
         fs::write(
             root.join("board.md"),
-            "---\ncolumns: [todo, doing, done]\nhidden: [todo]\nbranch_prefix: wk\ndefault_agent: opencode\n---\n",
+            "---\ncolumns: [todo, doing, done]\nhidden: [todo]\nbranch_prefix: wk\ndefault_agent: opencode\ndiff_tool: delta\n---\n",
         )
         .unwrap();
         let t = root.join("tasks").join("0042-fix-login");
@@ -421,6 +428,7 @@ mod tests {
         let board = load_board(&root).unwrap();
         assert_eq!(board.branch_prefix, "wk");
         assert_eq!(board.default_agent, "opencode");
+        assert_eq!(board.diff_tool, "delta");
         assert_eq!(board.visible_columns(), vec!["doing", "done"]);
         assert_eq!(board.tasks.len(), 1);
         let task = &board.tasks[0];

@@ -54,6 +54,19 @@ fn main() -> anyhow::Result<()> {
             })?;
             log(&format!("start dir={dir:?}"));
 
+            // diff 工具配置：HW_BOARD_ROOT（open_diff 注入）→ board.md 的 diff_tool；
+            // auto = 探测 delta→difft→纯文本；none = 纯文本；其他值 = 指定命令名（stdin 喂 diff）
+            let board_root = std::env::var("HW_BOARD_ROOT")
+                .ok()
+                .map(PathBuf::from)
+                .or_else(|| std::env::current_dir().ok().and_then(|d| model::find_board(&d)));
+            let diff_tool = board_root
+                .as_deref()
+                .and_then(|r| model::load_board(r).ok())
+                .map(|b| b.diff_tool)
+                .unwrap_or_else(|| "auto".to_string());
+            log(&format!("diff_tool={diff_tool}"));
+
             let run_git = |args: &[&str]| -> std::io::Result<std::process::Output> {
                 std::process::Command::new("git")
                     .arg("-C")
@@ -66,12 +79,19 @@ fn main() -> anyhow::Result<()> {
             let diff_text = String::from_utf8_lossy(&diff.stdout).trim().to_string();
             let untracked_text = String::from_utf8_lossy(&untracked.stdout).trim().to_string();
             let git_err = String::from_utf8_lossy(&diff.stderr).trim().to_string();
+            let has_content = !diff_text.is_empty() || !untracked_text.is_empty();
 
             if !diff_text.is_empty() {
-                // 渲染器探测链：delta → difft → 裸文本
-                let rendered = ["delta", "difft"].iter().find_map(|b| {
-                    let mut child = std::process::Command::new(b)
-                        .args(["--paging", "never"])
+                let tool: Option<String> = match diff_tool.as_str() {
+                    "none" | "" => None,
+                    "auto" => ["delta", "difft"]
+                        .iter()
+                        .find(|b| std::process::Command::new(*b).arg("--version").stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().map(|mut c| c.wait().map(|s| s.success()).unwrap_or(false)).unwrap_or(false))
+                        .map(|s| s.to_string()),
+                    named => Some(named.to_string()),
+                };
+                let rendered = tool.and_then(|t| {
+                    let mut child = std::process::Command::new(&t)
                         .stdin(std::process::Stdio::piped())
                         .stdout(std::process::Stdio::inherit())
                         .stderr(std::process::Stdio::null())
@@ -96,18 +116,28 @@ fn main() -> anyhow::Result<()> {
             if !untracked_text.is_empty() {
                 println!("\n未跟踪文件：\n{untracked_text}");
             }
-            if diff_text.is_empty() && untracked_text.is_empty() && git_err.is_empty() {
+            if !has_content && git_err.is_empty() {
                 println!("（该 worktree 相对 HEAD 无改动）");
             }
-            print!("\n按任意键关闭（5 秒后自动关闭）…");
+            // 有真内容：无限等待按键；空结果：5 秒自动关闭
+            if has_content {
+                print!("\n按任意键关闭…");
+            } else {
+                print!("\n按任意键关闭（5 秒后自动关闭）…");
+            }
             let _ = std::io::stdout().flush();
             log(&format!(
-                "diff={}B untracked={}B err={}B, holding",
+                "diff={}B untracked={}B err={}B, holding ({})",
                 diff_text.len(),
                 untracked_text.len(),
-                git_err.len()
+                git_err.len(),
+                if has_content { "forever" } else { "5s" }
             ));
-            wait_real_keypress();
+            wait_real_keypress(if has_content {
+                None
+            } else {
+                Some(std::time::Duration::from_secs(5))
+            });
             log("closing");
             std::process::exit(0);
         }
@@ -128,14 +158,16 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
     None
 }
 
-/// 等一个真实按键（最多 5 秒自动返回）。
+/// 等一个真实按键。timeout=None 时无限等待。
 /// overlay pane 的 spawn 会注入类 Esc 噪声事件——前 400ms 到达的事件一律吞掉。
-fn wait_real_keypress() {
+fn wait_real_keypress(timeout: Option<std::time::Duration>) {
     let _ = crossterm::terminal::enable_raw_mode();
     let start = std::time::Instant::now();
     loop {
-        if start.elapsed() > std::time::Duration::from_secs(5) {
-            break;
+        if let Some(t) = timeout {
+            if start.elapsed() > t {
+                break;
+            }
         }
         match crossterm::event::poll(std::time::Duration::from_millis(100)) {
             Ok(true) => {

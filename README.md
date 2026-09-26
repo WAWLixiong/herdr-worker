@@ -49,6 +49,7 @@ herdr plugin action invoke herdr-worker.open-board   # opens the Board pane
    hidden: [backlog, cancelled]
    branch_prefix: hw
    default_agent: claude
+   diff_tool: auto        # auto (probe delta→difft→plain) | none | a command name fed the diff on stdin
    ---
    ```
 
@@ -94,7 +95,7 @@ Everything is committed to git by default (clone = the whole board; agents self-
 | `s` | start attempt (worktree + agent + prompt) |
 | `r` | confirm a reviewed task into `done` |
 | `f` | follow-up: deliver undelivered comments to the agent |
-| `d` | open the worktree diff in a sibling pane |
+| `d` | open the worktree diff as a fullscreen overlay: tracked changes + untracked file list; any key closes (no timeout when there's content) |
 | `x` | stop the active attempt (cancelled; worktree kept) |
 | `c` | clean the task's plugin-owned worktree (branch never deleted) |
 | `H J K L` | move card to adjacent column / reorder within column |

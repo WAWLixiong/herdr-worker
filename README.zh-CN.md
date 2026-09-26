@@ -49,6 +49,7 @@ herdr plugin action invoke herdr-worker.open-board   # 打开 Board pane
    hidden: [backlog, cancelled]
    branch_prefix: hw
    default_agent: claude
+   diff_tool: auto        # auto（探测 delta→difft→纯文本）| none | 命令名（diff 从 stdin 喂入）
    ---
    ```
 
@@ -94,7 +95,7 @@ herdr plugin action invoke herdr-worker.open-board   # 打开 Board pane
 | `s` | 启动 attempt（worktree + agent + prompt） |
 | `r` | review 列确认入 done |
 | `f` | 追问：把未投递评论发给 agent |
-| `d` | 兄弟 pane 打开 worktree diff |
+| `d` | 全屏 overlay 打开 worktree diff：已跟踪改动 + 未跟踪文件清单；任意键关闭（有内容时不过期） |
 | `x` | 停止进行中的 attempt（cancelled；worktree 保留） |
 | `c` | 清理该任务插件自建的 worktree（分支永不删） |
 | `H J K L` | 卡片移到相邻列 / 列内排序 |
