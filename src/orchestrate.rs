@@ -392,8 +392,29 @@ pub fn clean_worktree(board_root: &Path, task_id: u32) -> Result<()> {
         validate_clean(&board, task_id)
     })?;
     // 锁外调 herdr（remove 可能慢；事件钩子会看到 worktree.removed）
-    herdr_json(&["worktree", "remove", "--workspace", &ws])
-        .map_err(|e| anyhow::anyhow!("worktree remove 失败（worktree 脏时需要 --force，分支不受影响）：{e}"))?;
+    if let Err(first) = herdr_json(&["worktree", "remove", "--workspace", &ws]) {
+        // Windows 竞态：herdr 关 workspace 杀进程是异步的，git 删目录可能抢在锁释放前
+        // → 等 1.5s 重试 --force；若 worktree 已不在列表（已实质移除）按成功处理
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        let _ = herdr_json(&["worktree", "remove", "--workspace", &ws, "--force"]);
+        let still_listed = herdr_json(&["worktree", "list"])
+            .ok()
+            .and_then(|l| {
+                l.pointer("/result/worktrees").and_then(|v| v.as_array()).map(|arr| {
+                    arr.iter().any(|w| {
+                        w.get("open_workspace_id").and_then(|s| s.as_str()) == Some(ws.as_str())
+                    })
+                })
+            })
+            .unwrap_or(true);
+        if !still_listed {
+            println!("cleaned worktree {ws}（目录若因进程锁残留可稍后手删；分支保留）");
+            return Ok(());
+        }
+        return Err(anyhow::anyhow!(
+            "worktree remove 失败（worktree 脏或被进程锁定时需要 --force；分支不受影响）：{first}"
+        ));
+    }
     println!("cleaned worktree {ws}");
     Ok(())
 }

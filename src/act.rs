@@ -23,6 +23,8 @@ pub fn run(args: &[String]) -> Result<()> {
         "report-result" => report_result(rest),
         "start-attempt" => start_attempt(rest),
         "stop-attempt" => stop_attempt(rest),
+        "follow-up" => follow_up(rest),
+        "clean-worktree" => clean_worktree(rest),
         "open-board" => open_board(),
         other => bail!("未知 action：{other}"),
     }
@@ -45,6 +47,24 @@ fn stop_attempt(args: &[String]) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("stop-attempt 需要 --id N"))?;
     let root = board_root(&flags)?;
     crate::orchestrate::stop_attempt(&root, id)
+}
+
+fn follow_up(args: &[String]) -> Result<()> {
+    let flags = parse_flags(args);
+    let id: u32 = one(&flags, "--id")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| anyhow::anyhow!("follow-up 需要 --id N"))?;
+    let root = board_root(&flags)?;
+    crate::orchestrate::follow_up(&root, id).map(|_| ())
+}
+
+fn clean_worktree(args: &[String]) -> Result<()> {
+    let flags = parse_flags(args);
+    let id: u32 = one(&flags, "--id")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| anyhow::anyhow!("clean-worktree 需要 --id N"))?;
+    let root = board_root(&flags)?;
+    crate::orchestrate::clean_worktree(&root, id)
 }
 
 /// --key value / --key=value / 重复 flag 聚成 Vec；key 保留完整 `--key` 形式
