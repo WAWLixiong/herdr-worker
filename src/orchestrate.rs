@@ -180,7 +180,7 @@ pub fn start_attempt(
             prompt
         };
         let mut landed = false;
-        for round in 0..3 {
+        for _round in 0..3 {
             if let Err(_e) = herdr_json(&["agent", "prompt", &agent_name, &prompt_text]) {
                 // prompt 被拒（如 agent_blocked）不重试
                 landed = true;
