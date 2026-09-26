@@ -1,0 +1,18 @@
+[package]
+name = "board-prototype"
+version = "0.1.0"
+edition = "2021"
+
+# PROTOTYPE — throwaway, answers wayfinder ticket 07 (看板 TUI 形态原型). Not production code.
+
+[dependencies]
+ratatui = "0.30.0"
+crossterm = "0.29.0"
+unicode-width = "0.2.2"
+
+[patch.crates-io]
+unicode-segmentation = { path = "vendor/unicode-segmentation" }
+
+[[bin]]
+name = "board-prototype"
+path = "src/main.rs"

@@ -1,0 +1,17 @@
+[package]
+name = "herdr-worker"
+version = "0.1.0"
+edition = "2021"
+description = "Kanban for coding agents, as a herdr plugin"
+license = "MIT"
+
+[dependencies]
+ratatui = "0.30.0"
+crossterm = "0.29.0"
+anyhow = "1.0.102"
+serde_json = "1.0.149"
+unicode-width = "0.2.2"
+
+# 本地离线构建补丁（crates.io 上 unicode-segmentation 1.13.1 被 yank；发布前见 v1 工单 07 的清理决定）
+[patch.crates-io]
+unicode-segmentation = { path = "vendor/unicode-segmentation" }

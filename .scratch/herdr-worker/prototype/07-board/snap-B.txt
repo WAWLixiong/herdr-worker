@@ -1,0 +1,36 @@
+ herdr-worker · my-app   /搜索(标题)  [过滤 tag=frontend ✕]                                                   
+— todo —                                                                                                      
+ 0041  更新依赖并修 CI  —                         a0                                                          
+ 0040  给导出接口加分页参数  —                         a0                                                     
+ 0039  修复设置页偶发白屏  —                         a0                                                       
+— in-progress —                                                                                               
+ 0031  重构认证模块  claude-co…▶ running       a2                                                             
+ 0042  抽取主题色到配置  opencode  ⛔ blocked       a1                                                        
+— review —                                                                                                    
+ 0043  CLI 加 --json 输出  claude-co…✓ done          a1  45k tok · $0.12                                      
+ 0038  修复竞态导致的偶发崩溃  gemini    ⏳ 空闲待确认         a3                                             
+— done —                                                                                                      
+ 0035  补齐 e2e 测试  claude-co…✓ done          a2  120k tok · $0.40                                          
+ 0036  文档：快速上手  qwen      ✓ done          a1  12k tok                                                  
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+ ↑↓ 行  Enter 详情  s 启动  d diff→兄弟pane  / 搜索  q 退出                                                   
+ ◀  A 经典看板  ▏[B 泳道列表] ▏ C 主从双栏  ▶  Tab 切换 · PROTOTYPE                                           
