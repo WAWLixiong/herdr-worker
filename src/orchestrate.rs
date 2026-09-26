@@ -465,6 +465,11 @@ pub fn open_diff(board_root: &Path, task_id: u32) -> Result<()> {
         _ => format!("git -C \"{path}\" diff HEAD"),
     };
 
+    // 板若以 overlay（放大层）打开：先解除自身放大，diff pane 才可见
+    // （zoom --off 在未放大时是无害 no-op）
+    if let Ok(self_pane) = std::env::var("HERDR_PANE_ID") {
+        let _ = herdr_json(&["pane", "zoom", "--pane", &self_pane, "--off"]);
+    }
     let split = herdr_json(&[
         "pane", "split", "--current", "--direction", "right", "--no-focus",
     ])?;

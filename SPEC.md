@@ -63,7 +63,7 @@ command = ["cargo", "build", "--release"]
 [[panes]]
 id = "board"
 title = "Board"
-placement = "split"                      # 打开时可覆盖 overlay/tab
+placement = "overlay"                    # 临时放大层：q 关闭后焦点/缩放自动还原；打开时可覆盖 split/tab
 command = ["herdr-worker", "board"]
 
 # 六件套（agent 与人经 herdr plugin action invoke 调用）

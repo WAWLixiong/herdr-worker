@@ -87,7 +87,8 @@ herdr plugin action invoke herdr-worker.open-board   # 打开 Board pane
 | --- | --- |
 | `←→` / `h l` | 列间移动 |
 | `↑↓` / `j k` | 卡片间移动 |
-| `Enter` / `Esc` | 打开 / 关闭详情浮层 |
+| `Enter` / `Esc` | 打开详情浮层 / 关闭（Esc 同时清除过滤） |
+| `q` | 退出板（唯一退出键——overlay pane 启动期可能收到类 Esc 事件，故 Esc 永不退出） |
 | `s` | 启动 attempt（worktree + agent + prompt） |
 | `r` | review 列确认入 done |
 | `f` | 追问：把未投递评论发给 agent |

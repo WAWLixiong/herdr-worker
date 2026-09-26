@@ -473,12 +473,12 @@ pub fn run(mut board: Board) -> Result<()> {
                 match key.code {
                     KeyCode::Char('q') => break,
                 KeyCode::Esc => {
+                    // Esc 不退出（overlay 场景下启动期可能收到类 Esc 事件）：
+                    // 只负责关详情浮层 / 清过滤；q 是唯一退出键
                     if st.detail {
                         st.detail = false;
                     } else if st.filter.is_some() {
                         st.filter = None;
-                    } else {
-                        break;
                     }
                 }
                     KeyCode::Enter => {

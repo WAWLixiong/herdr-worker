@@ -8,7 +8,7 @@ platforms = ["linux", "macos", "windows"]
 [[panes]]
 id = "board"
 title = "Board"
-placement = "split"
+placement = "overlay"
 command = ["target/release/herdr-worker", "board"]
 
 [[actions]]
