@@ -181,9 +181,8 @@ pub fn start_attempt(
         };
         let mut landed = false;
         for round in 0..3 {
-            if let Err(e) = herdr_json(&["agent", "prompt", &agent_name, &prompt_text]) {
+            if let Err(_e) = herdr_json(&["agent", "prompt", &agent_name, &prompt_text]) {
                 // prompt 被拒（如 agent_blocked）不重试
-                eprintln!("警告：agent prompt 被拒（agent 已启动）：{e}");
                 landed = true;
                 break;
             }
@@ -199,11 +198,9 @@ pub fn start_attempt(
             if landed {
                 break;
             }
-            eprintln!("警告：prompt 第 {} 次未见落袋（agent 空闲无反应），重发", round + 1);
         }
-        if !landed {
-            eprintln!("警告：prompt 三次未确认提交（agent 已启动，请手动跟进）");
-        }
+        // 未落袋（三次重试无反应）：agent 已启动，状态自会经 sync 回流；不再打印（TUI 进程禁打印）
+        let _ = landed;
 
         // 5) 任务自动入 in-progress
         let task_md = board_root
@@ -220,9 +217,6 @@ pub fn start_attempt(
             "--token", &format!("hw={task_id:04} ▶"),
         ]);
 
-        println!(
-            "started {task_id:04}#{n} agent={agent_kind} branch={branch} pane={pane_id} workspace={workspace_id}"
-        );
         Ok(StartedAttempt { n, pane_id, workspace_id, agent_name })
     })
 }
@@ -257,7 +251,6 @@ pub fn confirm_review(board_root: &Path, task_id: u32) -> Result<()> {
             .ok_or_else(|| anyhow::anyhow!("找不到任务文件"))?;
         write::set_field(&path, "status", "done")?;
         write::set_field(&path, "updated", &write::utc_now_rfc3339())?;
-        println!("confirmed {task_id:04} -> done");
         Ok(())
     })
 }
@@ -317,7 +310,6 @@ pub fn follow_up(board_root: &Path, task_id: u32) -> Result<usize> {
         for f in &files {
             write::set_field(f, "delivered", "true")?;
         }
-        println!("followed up {task_id:04} with {} comments", files.len());
         Ok(files.len())
     })
 }
@@ -354,7 +346,6 @@ pub fn stop_attempt(board_root: &Path, task_id: u32) -> Result<()> {
             .join(format!("{}.md", att.n));
         write::set_field(&att_path, "status", "cancelled")?;
         write::set_field(&att_path, "ended", &write::utc_now_rfc3339())?;
-        println!("stopped {task_id:04}#{} (worktree 保留)", att.n);
         Ok(())
     })
 }
@@ -408,14 +399,12 @@ pub fn clean_worktree(board_root: &Path, task_id: u32) -> Result<()> {
             })
             .unwrap_or(true);
         if !still_listed {
-            println!("cleaned worktree {ws}（目录若因进程锁残留可稍后手删；分支保留）");
             return Ok(());
         }
         return Err(anyhow::anyhow!(
             "worktree remove 失败（worktree 脏或被进程锁定时需要 --force；分支不受影响）：{first}"
         ));
     }
-    println!("cleaned worktree {ws}");
     Ok(())
 }
 
@@ -456,11 +445,12 @@ pub fn open_editor(board_root: &Path, task_id: u32) -> Result<()> {
     } else {
         let _ = herdr_json(&["pane", "focus", "--direction", "right", "--current"]);
     }
-    println!("editor opened in {pane_id} ({editor})");
     Ok(())
 }
 
-/// d：在兄弟 pane 打开任务 worktree 的 diff（delta → difftastic → git diff 回退）
+/// d：以 overlay 全屏打开任务 worktree 的 diff（delta → difftastic → git diff 回退）
+/// 实现：plugin pane open --entrypoint diff --placement overlay --env HW_DIFF_CMD=<cmd>；
+/// q 退出 pager → 进程退出 → overlay 合拢，自动还原回板
 pub fn open_diff(board_root: &Path, task_id: u32) -> Result<()> {
     let board = model::load_board(board_root)?;
     let task = board
@@ -506,20 +496,13 @@ pub fn open_diff(board_root: &Path, task_id: u32) -> Result<()> {
         _ => format!("git -C \"{path}\" diff HEAD"),
     };
 
-    // 板若以 overlay（放大层）打开：先解除自身放大，diff pane 才可见
-    // （zoom --off 在未放大时是无害 no-op）
-    if let Ok(self_pane) = std::env::var("HERDR_PANE_ID") {
-        let _ = herdr_json(&["pane", "zoom", "--pane", &self_pane, "--off"]);
-    }
-    let split = herdr_json(&[
-        "pane", "split", "--current", "--direction", "right", "--no-focus",
+    herdr_json(&[
+        "plugin", "pane", "open",
+        "--plugin", "herdr-worker",
+        "--entrypoint", "diff",
+        "--placement", "overlay",
+        "--env", &format!("HW_DIFF_CMD={cmd}"),
     ])?;
-    let pane_id = ["/result/pane/pane_id", "/result/pane_id", "/result/root_pane/pane_id"]
-        .iter()
-        .find_map(|p| split.pointer(p).and_then(|v| v.as_str()))
-        .ok_or_else(|| anyhow::anyhow!("pane split 响应缺 pane_id"))?;
-    herdr_json(&["pane", "run", pane_id, &cmd])?;
-    println!("diff opened in {pane_id} ({})", renderer.unwrap_or("git diff"));
     Ok(())
 }
 

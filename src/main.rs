@@ -34,6 +34,21 @@ fn main() -> anyhow::Result<()> {
         }
         Some("act") => act::run(&args[1..]),
         Some("sync") => sync::run(),
+        Some("diff") => {
+            // d 键的 overlay diff：HW_DIFF_CMD 由 plugin pane open --env 注入
+            let cmd = std::env::var("HW_DIFF_CMD").map_err(|_| {
+                anyhow::anyhow!("diff 子命令需要 HW_DIFF_CMD 环境变量（由板上按 d 注入）")
+            })?;
+            let shell: (&str, &str) = if cfg!(windows) {
+                ("cmd", "/c")
+            } else {
+                ("sh", "-c")
+            };
+            let status = std::process::Command::new(shell.0)
+                .args([shell.1, &cmd])
+                .status()?;
+            std::process::exit(status.code().unwrap_or(0));
+        }
         _ => {
             eprintln!("用法：herdr-worker board [--path DIR] | act <action> [--flags]");
             std::process::exit(2);

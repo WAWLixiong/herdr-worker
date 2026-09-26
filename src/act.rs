@@ -37,7 +37,12 @@ fn start_attempt(args: &[String]) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("start-attempt 需要 --id N"))?;
     let agent = one(&flags, "--agent");
     let root = board_root(&flags)?;
-    crate::orchestrate::start_attempt(&root, id, agent).map(|_| ())
+    let started = crate::orchestrate::start_attempt(&root, id, agent)?;
+    println!(
+        "started {id:04}#{} agent pane={} workspace={}",
+        started.n, started.pane_id, started.workspace_id
+    );
+    Ok(())
 }
 
 fn stop_attempt(args: &[String]) -> Result<()> {
@@ -46,7 +51,9 @@ fn stop_attempt(args: &[String]) -> Result<()> {
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| anyhow::anyhow!("stop-attempt 需要 --id N"))?;
     let root = board_root(&flags)?;
-    crate::orchestrate::stop_attempt(&root, id)
+    crate::orchestrate::stop_attempt(&root, id)?;
+    println!("stopped {id:04} (worktree 保留)");
+    Ok(())
 }
 
 fn follow_up(args: &[String]) -> Result<()> {
@@ -55,7 +62,9 @@ fn follow_up(args: &[String]) -> Result<()> {
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| anyhow::anyhow!("follow-up 需要 --id N"))?;
     let root = board_root(&flags)?;
-    crate::orchestrate::follow_up(&root, id).map(|_| ())
+    let n = crate::orchestrate::follow_up(&root, id)?;
+    println!("followed up {id:04} with {n} comments");
+    Ok(())
 }
 
 fn clean_worktree(args: &[String]) -> Result<()> {
@@ -64,7 +73,9 @@ fn clean_worktree(args: &[String]) -> Result<()> {
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| anyhow::anyhow!("clean-worktree 需要 --id N"))?;
     let root = board_root(&flags)?;
-    crate::orchestrate::clean_worktree(&root, id)
+    crate::orchestrate::clean_worktree(&root, id)?;
+    println!("cleaned {id:04} worktree (分支保留)");
+    Ok(())
 }
 
 /// --key value / --key=value / 重复 flag 聚成 Vec；key 保留完整 `--key` 形式

@@ -11,6 +11,13 @@ title = "Board"
 placement = "overlay"
 command = ["target/release/herdr-worker", "board"]
 
+# d 键的全屏 diff overlay：命令经 HW_DIFF_CMD 环境变量注入；q 退出 pager → overlay 合拢回板
+[[panes]]
+id = "diff"
+title = "Diff"
+placement = "overlay"
+command = ["target/release/herdr-worker", "diff"]
+
 [[actions]]
 id = "open-board"
 title = "Open Board"
