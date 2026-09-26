@@ -477,31 +477,13 @@ pub fn open_diff(board_root: &Path, task_id: u32) -> Result<()> {
         })
         .ok_or_else(|| anyhow::anyhow!("worktree list 里找不到 workspace {ws}（可能已清理）"))?;
 
-    // 渲染器探测链
-    let renderer = ["delta", "difft"]
-        .iter()
-        .find(|b| {
-            std::process::Command::new(b)
-                .arg("--version")
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .map(|mut c| c.wait().map(|s| s.success()).unwrap_or(false))
-                .unwrap_or(false)
-        })
-        .copied();
-    let cmd = match renderer {
-        Some("delta") => format!("git -C \"{path}\" diff HEAD | delta"),
-        Some("difft") => format!("git -C \"{path}\" diff HEAD | difft"),
-        _ => format!("git -C \"{path}\" diff HEAD"),
-    };
-
+    // 渲染器探测与输出交给 diff 子命令（它捕获 git 输出直出 + 时间窗驻留，
+    // 不依赖本机 pager——less 在裸 Windows 上常缺失）；这里只传 worktree 路径
     herdr_json(&[
         "plugin", "pane", "open",
         "--plugin", "herdr-worker",
         "--entrypoint", "diff",
         "--placement", "overlay",
-        "--env", &format!("HW_DIFF_CMD={cmd}"),
         "--env", &format!("HW_DIFF_DIR={path}"),
     ])?;
     Ok(())

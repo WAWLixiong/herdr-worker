@@ -35,36 +35,81 @@ fn main() -> anyhow::Result<()> {
         Some("act") => act::run(&args[1..]),
         Some("sync") => sync::run(),
         Some("diff") => {
-            // d 键的 overlay diff：HW_DIFF_CMD 由 plugin pane open --env 注入
-            let cmd = std::env::var("HW_DIFF_CMD").map_err(|_| {
-                anyhow::anyhow!("diff 子命令需要 HW_DIFF_CMD 环境变量（由板上按 d 注入）")
-            })?;
-            // 空 diff 不闪屏：worktree 相对 HEAD 无变化时，提示并等回车再合拢
-            if let Ok(dir) = std::env::var("HW_DIFF_DIR") {
-                let quiet = std::process::Command::new("git")
-                    .args(["-C", &dir, "diff", "HEAD", "--quiet"])
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status();
-                if matches!(quiet, Ok(s) if s.success()) {
-                    println!("（该 worktree 相对 HEAD 无差异）");
-                    print!("按回车关闭…");
-                    use std::io::Write;
-                    let _ = std::io::stdout().flush();
-                    let mut line = String::new();
-                    let _ = std::io::stdin().read_line(&mut line);
-                    std::process::exit(0);
-                }
-            }
-            let shell: (&str, &str) = if cfg!(windows) {
-                ("cmd", "/c")
-            } else {
-                ("sh", "-c")
+            // d 键的 overlay diff：HW_DIFF_DIR 由 plugin pane open --env 注入。
+            // 不依赖 git pager（less 在裸 Windows 上常缺失——曾表现为
+            // "'less' 不是内部或外部命令"）：捕获输出直接打印 + 时间窗按键驻留；
+            // delta/difft 存在时先经渲染链上色。
+            use std::io::Write;
+            let log = |msg: &str| {
+                let _ = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(std::env::temp_dir().join("herdr-worker-debug.log"))
+                    .and_then(|mut f| {
+                        writeln!(f, "[{}] diff: {msg}", crate::write::utc_now_rfc3339())
+                    });
             };
-            let status = std::process::Command::new(shell.0)
-                .args([shell.1, &cmd])
-                .status()?;
-            std::process::exit(status.code().unwrap_or(0));
+            let dir = std::env::var("HW_DIFF_DIR").map_err(|_| {
+                anyhow::anyhow!("diff 子命令需要 HW_DIFF_DIR 环境变量（由板上按 d 注入）")
+            })?;
+            log(&format!("start dir={dir:?}"));
+
+            let run_git = |args: &[&str]| -> std::io::Result<std::process::Output> {
+                std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(&dir)
+                    .args(args)
+                    .output()
+            };
+            let diff = run_git(&["--no-pager", "diff", "HEAD"])?;
+            let untracked = run_git(&["ls-files", "--others", "--exclude-standard"])?;
+            let diff_text = String::from_utf8_lossy(&diff.stdout).trim().to_string();
+            let untracked_text = String::from_utf8_lossy(&untracked.stdout).trim().to_string();
+            let git_err = String::from_utf8_lossy(&diff.stderr).trim().to_string();
+
+            if !diff_text.is_empty() {
+                // 渲染器探测链：delta → difft → 裸文本
+                let rendered = ["delta", "difft"].iter().find_map(|b| {
+                    let mut child = std::process::Command::new(b)
+                        .args(["--paging", "never"])
+                        .stdin(std::process::Stdio::piped())
+                        .stdout(std::process::Stdio::inherit())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .ok()?;
+                    child
+                        .stdin
+                        .as_mut()
+                        .and_then(|s| s.write_all(diff_text.as_bytes()).ok())
+                        .map(|_| child)
+                });
+                match rendered {
+                    Some(mut child) => {
+                        let _ = child.wait();
+                    }
+                    None => println!("{diff_text}"),
+                }
+            } else if !git_err.is_empty() {
+                // 例如 unborn 分支：fatal: ambiguous argument 'HEAD'
+                println!("（git：{git_err}）");
+            }
+            if !untracked_text.is_empty() {
+                println!("\n未跟踪文件：\n{untracked_text}");
+            }
+            if diff_text.is_empty() && untracked_text.is_empty() && git_err.is_empty() {
+                println!("（该 worktree 相对 HEAD 无改动）");
+            }
+            print!("\n按任意键关闭（5 秒后自动关闭）…");
+            let _ = std::io::stdout().flush();
+            log(&format!(
+                "diff={}B untracked={}B err={}B, holding",
+                diff_text.len(),
+                untracked_text.len(),
+                git_err.len()
+            ));
+            wait_real_keypress();
+            log("closing");
+            std::process::exit(0);
         }
         _ => {
             eprintln!("用法：herdr-worker board [--path DIR] | act <action> [--flags]");
@@ -81,4 +126,28 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// 等一个真实按键（最多 5 秒自动返回）。
+/// overlay pane 的 spawn 会注入类 Esc 噪声事件——前 400ms 到达的事件一律吞掉。
+fn wait_real_keypress() {
+    let _ = crossterm::terminal::enable_raw_mode();
+    let start = std::time::Instant::now();
+    loop {
+        if start.elapsed() > std::time::Duration::from_secs(5) {
+            break;
+        }
+        match crossterm::event::poll(std::time::Duration::from_millis(100)) {
+            Ok(true) => {
+                let _ = crossterm::event::read();
+                // 400ms 后到达的才算用户按键
+                if start.elapsed() > std::time::Duration::from_millis(400) {
+                    break;
+                }
+            }
+            Ok(false) => {}
+            Err(_) => break,
+        }
+    }
+    let _ = crossterm::terminal::disable_raw_mode();
 }
