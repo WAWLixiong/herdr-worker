@@ -22,6 +22,20 @@ fn herdr_bin() -> String {
     std::env::var("HERDR_BIN_PATH").unwrap_or_else(|_| "herdr".to_string())
 }
 
+/// 查询 agent 当前状态（轻量容错：失败返回 None）
+fn agent_status_of(name: &str) -> Option<String> {
+    let out = Command::new(herdr_bin())
+        .args(["agent", "get", name])
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let v: serde_json::Value = serde_json::from_str(&stdout).ok()?;
+    v.pointer("/result/agent_status")
+        .or_else(|| v.pointer("/result/agent/agent_status"))
+        .and_then(|s| s.as_str())
+        .map(String::from)
+}
+
 fn herdr_json(args: &[&str]) -> Result<serde_json::Value> {
     let out = Command::new(herdr_bin())
         .args(args)
@@ -149,6 +163,8 @@ pub fn start_attempt(
         ]);
 
         // 4) agent prompt：正文 + API 页脚
+        //    fresh opencode 的首条粘贴可能被欢迎屏吞掉（状态停在 idle、无输出）——
+        //    发出后轮询 ~6s，未观察到 working/blocked 则重发，最多 3 次
         let prompt = format!(
             "{}{}",
             task.body.trim(),
@@ -159,9 +175,30 @@ pub fn start_attempt(
         } else {
             prompt
         };
-        if let Err(e) = herdr_json(&["agent", "prompt", &agent_name, &prompt_text]) {
-            // prompt 失败不回滚：agent 已在跑，用户可手动跟进（T06 的 f 键）
-            eprintln!("警告：agent prompt 失败（agent 已启动）：{e}");
+        let mut landed = false;
+        for round in 0..3 {
+            if let Err(e) = herdr_json(&["agent", "prompt", &agent_name, &prompt_text]) {
+                // prompt 被拒（如 agent_blocked）不重试
+                eprintln!("警告：agent prompt 被拒（agent 已启动）：{e}");
+                landed = true;
+                break;
+            }
+            for _ in 0..8 {
+                std::thread::sleep(std::time::Duration::from_millis(700));
+                if let Some(st) = agent_status_of(&agent_name) {
+                    if matches!(st, "working" | "blocked") {
+                        landed = true;
+                        break;
+                    }
+                }
+            }
+            if landed {
+                break;
+            }
+            eprintln!("警告：prompt 第 {} 次未见落袋（agent 空闲无反应），重发", round + 1);
+        }
+        if !landed {
+            eprintln!("警告：prompt 三次未确认提交（agent 已启动，请手动跟进）");
         }
 
         // 5) 任务自动入 in-progress
