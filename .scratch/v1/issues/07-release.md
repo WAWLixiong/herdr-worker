@@ -4,10 +4,12 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 双语 README（英文为主 + 中文全译），含"个人草稿板 gitignore"说明
-- [ ] LICENSE MIT；.gitignore 完整
-- [ ] git 仓库建立 + 初始提交（经用户确认后执行）
-- [ ] marketplace 上架清单（topic、manifest 元数据齐全）
-- [ ] 全新 checkout 模拟：build 命令 + pane 命令相对路径可用
+- [x] 双语 README（英文为主 + 中文全译），含"个人草稿板 gitignore"说明
+- [x] LICENSE MIT；.gitignore 完整
+- [x] git 仓库建立 + 初始提交（fe13e7c，经用户放行后执行；工单 04 时因 worktree 编排需要而提前）
+- [x] marketplace 上架清单（README 发布章节：topic `herdr-plugin` + 根目录 manifest；实际 push 与打 topic 由用户执行）
+- [x] 全新 checkout 模拟：build 命令 + pane 命令相对路径可用（temp clone 14.9s 构建成功，exe/vendor/manifest 齐）
+
+> vendor patch 决定：**保留**。unicode-segmentation 1.13.1 在 crates.io 被 yank，vendor 锁定 herdr 本体同版本——确定性构建且规避 yank 问题，README 已注明 clone 时保留 vendor/。
