@@ -46,6 +46,10 @@ fn herdr_json(args: &[&str]) -> Result<serde_json::Value> {
     if !out.status.success() {
         bail!("herdr {} 失败（{}）：{}", args.first().unwrap_or(&""), out.status, stderr.trim());
     }
+    // 有些命令（如 pane run）成功时无输出——宽容返回 Null
+    if stdout.trim().is_empty() {
+        return Ok(serde_json::Value::Null);
+    }
     serde_json::from_str(&stdout).with_context(|| format!("解析 herdr 输出失败：{stdout}"))
 }
 
@@ -336,7 +340,11 @@ pub fn stop_attempt(board_root: &Path, task_id: u32) -> Result<()> {
         }
         std::thread::sleep(std::time::Duration::from_millis(600));
         if let Some(pane) = &att.pane {
-            let _ = herdr_json(&["pane", "release-agent", pane, "--source", "herdr-worker"]);
+            let _ = herdr_json(&[
+                "pane", "release-agent", pane,
+                "--source", "herdr-worker",
+                "--agent", &att.agent,
+            ]);
         }
         let att_path = board
             .root
