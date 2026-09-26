@@ -23,6 +23,10 @@ pub struct UiState {
     pub sel_col: usize,
     pub detail: bool,
     pub error: Option<String>,
+    /// 已应用的过滤（标题子串 或 tag:xxx）
+    pub filter: Option<String>,
+    /// 搜索输入模式（Some = 正在输入）
+    pub input: Option<String>,
 }
 
 fn trunc(s: &str, width: usize) -> String {
@@ -58,7 +62,7 @@ fn attempt_badge(att: Option<&crate::model::Attempt>) -> Option<(&'static str, C
     }
 }
 
-fn header_line(board: &Board, error: &Option<String>) -> Line<'static> {
+fn header_line(board: &Board, error: &Option<String>, filter: &Option<String>, input: &Option<String>) -> Line<'static> {
     let repo = board
         .root
         .parent()
@@ -69,19 +73,40 @@ fn header_line(board: &Board, error: &Option<String>) -> Line<'static> {
         format!(" herdr-worker · {repo} "),
         Style::new().fg(Color::Black).bg(Color::Cyan).bold(),
     )];
+    if let Some(f) = filter {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("[过滤 {f} ✕(Esc)]"),
+            Style::new().fg(Color::Yellow),
+        ));
+    }
+    if let Some(inp) = input {
+        spans.push(Span::raw("  /"));
+        spans.push(Span::styled(inp.clone(), Style::new().fg(Color::White).bold()));
+        spans.push(Span::styled("_", Style::new().fg(Color::DarkGray)));
+    }
     if let Some(e) = error {
         spans.push(Span::raw("  "));
         spans.push(Span::styled(
-            format!(" ⚠ {}", trunc(e, 90)),
+            format!(" ⚠ {}", trunc(e, 80)),
             Style::new().fg(Color::White).bg(Color::Red).bold(),
         ));
     }
     Line::from(spans)
 }
 
+/// 过滤谓词：`tag:xxx` 匹配标签，其余为标题子串
+fn matches_filter(t: &crate::model::Task, f: &Option<String>) -> bool {
+    let Some(f) = f else { return true };
+    if let Some(tag) = f.strip_prefix("tag:") {
+        return t.tags.iter().any(|x| x.contains(tag));
+    }
+    t.title.contains(f.as_str())
+}
+
 fn help_line() -> Line<'static> {
     Line::from(Span::styled(
-        " ←→/hjkl 列 · ↑↓/jk 卡 · s 启动 · H/J/K/L 移卡/排序 · Enter 详情 · Esc 返回 · q 退出",
+        " ←→/hjkl 列 · ↑↓/jk 卡 · s 启动 · r 审过 · f 反馈 · d diff · x 停止 · c 清理 · / 过滤 · H/J/K/L 移卡 · Enter 详情 · q 退出",
         Style::new().fg(Color::DarkGray),
     ))
 }
@@ -211,6 +236,9 @@ fn detail_text(board: &Board, task_idx: usize) -> Text<'static> {
         if let Some(f) = &c.file {
             spans.push(Span::styled(format!(" @{}", f), Style::new().fg(Color::Yellow)));
         }
+        if c.delivered {
+            spans.push(Span::styled(" ✓已投递", Style::new().fg(Color::DarkGray)));
+        }
         lines.push(Line::from(spans));
         lines.push(Line::from(Span::raw(format!("  {}", c.body.trim_end()))));
     }
@@ -225,7 +253,7 @@ pub fn render(f: &mut Frame, board: &Board, st: &UiState) {
         Constraint::Length(1),
     ])
     .split(area);
-    f.render_widget(Paragraph::new(header_line(board, &st.error)), rows[0]);
+    f.render_widget(Paragraph::new(header_line(board, &st.error, &st.filter, &st.input)), rows[0]);
 
     let columns = board.visible_columns();
     let col_areas = Layout::horizontal(vec![Constraint::Fill(1); columns.len().max(1)])
@@ -233,7 +261,11 @@ pub fn render(f: &mut Frame, board: &Board, st: &UiState) {
     let selected_id = board.tasks.get(st.sel).map(|t| t.id);
 
     for (i, col) in columns.iter().enumerate() {
-        let tasks = board.tasks_in(col);
+        let tasks: Vec<&crate::model::Task> = board
+            .tasks_in(col)
+            .into_iter()
+            .filter(|t| matches_filter(t, &st.filter))
+            .collect();
         let active = i == st.sel_col;
         let block = Block::bordered()
             .title(format!(" {col} ({}) ", tasks.len()))
@@ -318,6 +350,21 @@ pub fn snapshot(board: &Board, st: &UiState, path: &std::path::Path, w: u16, h: 
     Ok(())
 }
 
+/// 通用动作执行器：对选中任务执行 op，失败红条显示在头部
+fn run_action(
+    board: &Board,
+    st: &mut UiState,
+    op: impl FnOnce(&std::path::Path, u32) -> Result<()>,
+) {
+    if let Some(id) = board.tasks.get(st.sel).map(|t| t.id) {
+        let root = board.root.clone();
+        match op(&root, id) {
+            Ok(_) => st.error = None,
+            Err(e) => st.error = Some(e.to_string()),
+        }
+    }
+}
+
 /// H/L：把选中卡移到相邻列（status 变更，order 清除）
 fn move_to_col(board: &Board, st: &mut UiState, delta: i32) {
     let cols = board.visible_columns();
@@ -366,7 +413,7 @@ fn reorder(board: &Board, st: &mut UiState, delta: i32) {
 }
 
 pub fn run(mut board: Board) -> Result<()> {
-    let mut st = UiState { sel: 0, sel_col: 0, detail: false, error: None };
+    let mut st = UiState { sel: 0, sel_col: 0, detail: false, error: None, filter: None, input: None };
     // 初始选中：第一张可见卡
     if !board.tasks.is_empty() {
         let cols = board.visible_columns();
@@ -392,6 +439,25 @@ pub fn run(mut board: Board) -> Result<()> {
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
+                // 搜索输入模式：吃掉所有按键
+                if let Some(inp) = st.input.as_mut() {
+                    match key.code {
+                        KeyCode::Enter => {
+                            st.filter = if inp.is_empty() { None } else { Some(inp.clone()) };
+                            st.input = None;
+                        }
+                        KeyCode::Esc => {
+                            st.input = None;
+                            st.filter = None;
+                        }
+                        KeyCode::Backspace => {
+                            inp.pop();
+                        }
+                        KeyCode::Char(c) => inp.push(c),
+                        _ => {}
+                    }
+                    continue;
+                }
                 let columns = board.visible_columns();
                 let move_col = |st: &mut UiState, delta: i32| {
                     if columns.is_empty() {
@@ -406,13 +472,15 @@ pub fn run(mut board: Board) -> Result<()> {
                 };
                 match key.code {
                     KeyCode::Char('q') => break,
-                    KeyCode::Esc => {
-                        if st.detail {
-                            st.detail = false;
-                        } else {
-                            break;
-                        }
+                KeyCode::Esc => {
+                    if st.detail {
+                        st.detail = false;
+                    } else if st.filter.is_some() {
+                        st.filter = None;
+                    } else {
+                        break;
                     }
+                }
                     KeyCode::Enter => {
                         if !board.tasks.is_empty() {
                             st.detail = !st.detail;
@@ -434,6 +502,14 @@ pub fn run(mut board: Board) -> Result<()> {
                             }
                         }
                     }
+                    KeyCode::Char('r') => run_action(&board, &mut st, crate::orchestrate::confirm_review),
+                    KeyCode::Char('f') => run_action(&board, &mut st, |r, id| {
+                        crate::orchestrate::follow_up(r, id).map(|_| ())
+                    }),
+                    KeyCode::Char('d') => run_action(&board, &mut st, crate::orchestrate::open_diff),
+                    KeyCode::Char('x') => run_action(&board, &mut st, crate::orchestrate::stop_attempt),
+                    KeyCode::Char('c') => run_action(&board, &mut st, crate::orchestrate::clean_worktree),
+                    KeyCode::Char('/') => st.input = Some(String::new()),
                 KeyCode::Up | KeyCode::Char('k') => {
                     if st.sel_col < columns.len() {
                         let idxs: Vec<usize> = board
@@ -502,6 +578,33 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn filter_predicate() {
+        use crate::model::Task;
+        let mk = |title: &str, tags: Vec<&str>| Task {
+            id: 1,
+            dir_name: "0001-x".into(),
+            title: title.into(),
+            status: "todo".into(),
+            priority: None,
+            tags: tags.into_iter().map(String::from).collect(),
+            parent: None,
+            blocked_by: vec![],
+            order: None,
+            created: None,
+            updated: None,
+            body: String::new(),
+            attempts: vec![],
+            comments: vec![],
+        };
+        let t = mk("修复登录页", vec!["bug", "frontend"]);
+        assert!(matches_filter(&t, &None));
+        assert!(matches_filter(&t, &Some("登录".into())));
+        assert!(!matches_filter(&t, &Some("导出".into())));
+        assert!(matches_filter(&t, &Some("tag:bug".into())));
+        assert!(!matches_filter(&t, &Some("tag:api".into())));
+    }
+
+    #[test]
     fn render_smoke_contains_known_content() {
         let root = std::env::temp_dir().join(format!("herdr-worker-tui-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
@@ -521,7 +624,7 @@ mod tests {
 
         let backend = TestBackend::new(160, 30);
         let mut terminal = Terminal::new(backend).unwrap();
-        let st = UiState { sel: 0, sel_col: 1, detail: false, error: None };
+        let st = UiState { sel: 0, sel_col: 1, detail: false, error: None, filter: None, input: None };
         terminal.draw(|f| render(f, &board, &st)).unwrap();
         let text = buffer_text(terminal.backend().buffer());
         assert!(text.contains("修复登录页偶发白屏"), "看板帧应含任务标题");
@@ -529,7 +632,7 @@ mod tests {
         assert!(text.contains("⛔ blocked"), "看板帧应含 blocked 徽章");
         assert!(text.contains("5k tok"), "看板帧应含用量");
 
-        let st = UiState { sel: 0, sel_col: 1, detail: true, error: None };
+        let st = UiState { sel: 0, sel_col: 1, detail: true, error: None, filter: None, input: None };
         terminal.draw(|f| render(f, &board, &st)).unwrap();
         let text = buffer_text(terminal.backend().buffer());
         assert!(text.contains("attempts"), "详情帧应含 attempts 区");
@@ -555,7 +658,7 @@ mod tests {
         let board = load_board(&root).unwrap();
         // 选中 0001（order 0 排前）
         let sel = board.tasks.iter().position(|t| t.id == 1).unwrap();
-        let mut st = UiState { sel, sel_col: 0, detail: false, error: None };
+        let mut st = UiState { sel, sel_col: 0, detail: false, error: None, filter: None, input: None };
 
         // J：列内交换，0001 与 0002 换位，整列 order 归一化
         reorder(&board, &mut st, 1);
@@ -567,7 +670,7 @@ mod tests {
         // L：todo → in-progress（重载后 0001 仍在 todo，order=1 排第二）
         let board = load_board(&root).unwrap();
         let sel = board.tasks.iter().position(|t| t.id == 1).unwrap();
-        let mut st = UiState { sel, sel_col: 0, detail: false, error: None };
+        let mut st = UiState { sel, sel_col: 0, detail: false, error: None, filter: None, input: None };
         move_to_col(&board, &mut st, 1);
         let src = fs::read_to_string(root.join("tasks").join("0001-alpha").join("task.md")).unwrap();
         assert!(src.contains("status: in-progress"), "应已移入 in-progress：{src}");

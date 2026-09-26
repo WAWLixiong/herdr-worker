@@ -68,7 +68,11 @@ pub struct Comment {
     pub time: Option<String>,
     pub file: Option<String>,
     pub hunk: Option<String>,
+    /// 已随 follow-up 投递给 agent 的评论不再携带
+    pub delivered: bool,
     pub body: String,
+    /// 评论文件名（写 delivered 标记用）
+    pub file_name: String,
 }
 
 impl Board {
@@ -347,6 +351,10 @@ fn load_comments(dir: &Path) -> Result<Vec<Comment>> {
         let src = fs::read_to_string(&path)?;
         let (fm, body) = frontmatter::split(&src);
         let m = fm.map(|fm| Frontmap::parse(&fm)).transpose()?;
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
         out.push(Comment {
             author: m
                 .as_ref()
@@ -356,7 +364,13 @@ fn load_comments(dir: &Path) -> Result<Vec<Comment>> {
             time: m.as_ref().and_then(|m| m.str("time")).map(String::from),
             file: m.as_ref().and_then(|m| m.str("file")).map(String::from),
             hunk: m.as_ref().and_then(|m| m.str("hunk")).map(String::from),
+            delivered: m
+                .as_ref()
+                .and_then(|m| m.str("delivered"))
+                .map(|s| s == "true")
+                .unwrap_or(false),
             body,
+            file_name,
         });
     }
     Ok(out)

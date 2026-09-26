@@ -22,6 +22,7 @@ pub fn run(args: &[String]) -> Result<()> {
         "add-comment" => add_comment(rest),
         "report-result" => report_result(rest),
         "start-attempt" => start_attempt(rest),
+        "stop-attempt" => stop_attempt(rest),
         "open-board" => open_board(),
         other => bail!("未知 action：{other}"),
     }
@@ -35,6 +36,15 @@ fn start_attempt(args: &[String]) -> Result<()> {
     let agent = one(&flags, "--agent");
     let root = board_root(&flags)?;
     crate::orchestrate::start_attempt(&root, id, agent).map(|_| ())
+}
+
+fn stop_attempt(args: &[String]) -> Result<()> {
+    let flags = parse_flags(args);
+    let id: u32 = one(&flags, "--id")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| anyhow::anyhow!("stop-attempt 需要 --id N"))?;
+    let root = board_root(&flags)?;
+    crate::orchestrate::stop_attempt(&root, id)
 }
 
 /// --key value / --key=value / 重复 flag 聚成 Vec；key 保留完整 `--key` 形式

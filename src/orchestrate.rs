@@ -234,9 +234,293 @@ pub fn has_active_attempt(board: &Board, task_id: u32) -> bool {
         .unwrap_or(false)
 }
 
+// ---------- 06：人侧闭环 ----------
+
+/// r：review → done（人审确认）
+pub fn confirm_review(board_root: &Path, task_id: u32) -> Result<()> {
+    with_lock(board_root, || {
+        let board = model::load_board(board_root)?;
+        let task = board
+            .tasks
+            .iter()
+            .find(|t| t.id == task_id)
+            .ok_or_else(|| anyhow::anyhow!("任务 {task_id:04} 不存在"))?;
+        if task.status != "review" {
+            bail!("只有 review 列的任务能确认入 done（当前在 {status} 列）", status = task.status);
+        }
+        let path = board
+            .task_path(task_id)
+            .ok_or_else(|| anyhow::anyhow!("找不到任务文件"))?;
+        write::set_field(&path, "status", "done")?;
+        write::set_field(&path, "updated", &write::utc_now_rfc3339())?;
+        println!("confirmed {task_id:04} -> done");
+        Ok(())
+    })
+}
+
+/// follow-up 的纯准备段（可测）：返回 (agent 名, prompt 文本, 待标记的评论文件)
+fn prepare_follow_up(board: &Board, task_id: u32) -> Result<(String, String, Vec<std::path::PathBuf>)> {
+    let task = board
+        .tasks
+        .iter()
+        .find(|t| t.id == task_id)
+        .ok_or_else(|| anyhow::anyhow!("任务 {task_id:04} 不存在"))?;
+    let att = task
+        .latest_attempt()
+        .filter(|a| matches!(a.status.as_str(), "running" | "blocked"))
+        .ok_or_else(|| anyhow::anyhow!("任务 {task_id:04} 没有进行中的 attempt"))?;
+    if att.status == "blocked" {
+        bail!("agent 正在 blocked 等你回答——去 pane 里答复；f 仅用于补充反馈");
+    }
+    let name = att
+        .agent_name
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("attempt 没有记录 agent 名"))?;
+    let undelivered: Vec<&crate::model::Comment> =
+        task.comments.iter().filter(|c| !c.delivered).collect();
+    if undelivered.is_empty() {
+        bail!("没有未投递的评论（先 act add-comment 或手写评论文件）");
+    }
+    let mut text = String::from("用户补充反馈（逐条处理）：\n");
+    for c in &undelivered {
+        let loc = match (&c.file, &c.hunk) {
+            (Some(f), Some(h)) => format!("（位置 {f} {h}）"),
+            (Some(f), None) => format!("（位置 {f}）"),
+            _ => String::new(),
+        };
+        text.push_str(&format!("- {loc}{}\n", c.body.trim()));
+    }
+    let files: Vec<std::path::PathBuf> = undelivered
+        .iter()
+        .map(|c| {
+            board
+                .root
+                .join("tasks")
+                .join(&task.dir_name)
+                .join("comments")
+                .join(&c.file_name)
+        })
+        .collect();
+    Ok((name, text, files))
+}
+
+/// f：向活跃 attempt 的 agent 追加 prompt，携带未投递评论并标记已投递
+pub fn follow_up(board_root: &Path, task_id: u32) -> Result<usize> {
+    with_lock(board_root, || {
+        let board = model::load_board(board_root)?;
+        let (name, text, files) = prepare_follow_up(&board, task_id)?;
+        herdr_json(&["agent", "prompt", &name, &text])?;
+        for f in &files {
+            write::set_field(f, "delivered", "true")?;
+        }
+        println!("followed up {task_id:04} with {} comments", files.len());
+        Ok(files.len())
+    })
+}
+
+/// x：停止活跃 attempt（ctrl+c → 尽力 release → cancelled；worktree 保留）
+pub fn stop_attempt(board_root: &Path, task_id: u32) -> Result<()> {
+    with_lock(board_root, || {
+        let board = model::load_board(board_root)?;
+        let task = board
+            .tasks
+            .iter()
+            .find(|t| t.id == task_id)
+            .ok_or_else(|| anyhow::anyhow!("任务 {task_id:04} 不存在"))?;
+        let att = task
+            .latest_attempt()
+            .filter(|a| matches!(a.status.as_str(), "running" | "blocked"))
+            .ok_or_else(|| anyhow::anyhow!("任务 {task_id:04} 没有进行中的 attempt"))?;
+        if let Some(name) = &att.agent_name {
+            let _ = herdr_json(&["agent", "send-keys", name, "ctrl+c"]);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        if let Some(pane) = &att.pane {
+            let _ = herdr_json(&["pane", "release-agent", pane, "--source", "herdr-worker"]);
+        }
+        let att_path = board
+            .root
+            .join("tasks")
+            .join(&task.dir_name)
+            .join("attempts")
+            .join(format!("{}.md", att.n));
+        write::set_field(&att_path, "status", "cancelled")?;
+        write::set_field(&att_path, "ended", &write::utc_now_rfc3339())?;
+        println!("stopped {task_id:04}#{} (worktree 保留)", att.n);
+        Ok(())
+    })
+}
+
+/// c：清理插件自建 worktree（分支永不删）——校验段可测
+fn validate_clean(board: &Board, task_id: u32) -> Result<String> {
+    let task = board
+        .tasks
+        .iter()
+        .find(|t| t.id == task_id)
+        .ok_or_else(|| anyhow::anyhow!("任务 {task_id:04} 不存在"))?;
+    let att = task
+        .latest_attempt()
+        .ok_or_else(|| anyhow::anyhow!("任务 {task_id:04} 没有 attempt"))?;
+    let ws = att
+        .workspace
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("attempt 没有记录 workspace"))?;
+    if !att
+        .branch
+        .starts_with(&format!("{}/", board.branch_prefix))
+    {
+        bail!(
+            "分支 {} 不是插件前缀 {} 开头，拒绝清理",
+            att.branch,
+            board.branch_prefix
+        );
+    }
+    Ok(ws)
+}
+
+pub fn clean_worktree(board_root: &Path, task_id: u32) -> Result<()> {
+    let ws = with_lock(board_root, || {
+        let board = model::load_board(board_root)?;
+        validate_clean(&board, task_id)
+    })?;
+    // 锁外调 herdr（remove 可能慢；事件钩子会看到 worktree.removed）
+    herdr_json(&["worktree", "remove", "--workspace", &ws])
+        .map_err(|e| anyhow::anyhow!("worktree remove 失败（worktree 脏时需要 --force，分支不受影响）：{e}"))?;
+    println!("cleaned worktree {ws}");
+    Ok(())
+}
+
+/// d：在兄弟 pane 打开任务 worktree 的 diff（delta → difftastic → git diff 回退）
+pub fn open_diff(board_root: &Path, task_id: u32) -> Result<()> {
+    let board = model::load_board(board_root)?;
+    let task = board
+        .tasks
+        .iter()
+        .find(|t| t.id == task_id)
+        .ok_or_else(|| anyhow::anyhow!("任务 {task_id:04} 不存在"))?;
+    let att = task
+        .latest_attempt()
+        .filter(|a| a.workspace.is_some())
+        .ok_or_else(|| anyhow::anyhow!("任务 {task_id:04} 没有关联 worktree 的 attempt"))?;
+    let ws = att.workspace.clone().unwrap();
+
+    // worktree list → path
+    let list = herdr_json(&["worktree", "list"])?;
+    let path = list
+        .pointer("/result/worktrees")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| {
+            arr.iter()
+                .find(|w| w.get("open_workspace_id").and_then(|s| s.as_str()) == Some(ws.as_str()))
+                .and_then(|w| w.get("path").and_then(|p| p.as_str()))
+                .map(String::from)
+        })
+        .ok_or_else(|| anyhow::anyhow!("worktree list 里找不到 workspace {ws}（可能已清理）"))?;
+
+    // 渲染器探测链
+    let renderer = ["delta", "difft"]
+        .iter()
+        .find(|b| {
+            std::process::Command::new(b)
+                .arg("--version")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map(|mut c| c.wait().map(|s| s.success()).unwrap_or(false))
+                .unwrap_or(false)
+        })
+        .copied();
+    let cmd = match renderer {
+        Some("delta") => format!("git -C \"{path}\" diff HEAD | delta"),
+        Some("difft") => format!("git -C \"{path}\" diff HEAD | difft"),
+        _ => format!("git -C \"{path}\" diff HEAD"),
+    };
+
+    let split = herdr_json(&[
+        "pane", "split", "--current", "--direction", "right", "--no-focus",
+    ])?;
+    let pane_id = ["/result/pane/pane_id", "/result/pane_id", "/result/root_pane/pane_id"]
+        .iter()
+        .find_map(|p| split.pointer(p).and_then(|v| v.as_str()))
+        .ok_or_else(|| anyhow::anyhow!("pane split 响应缺 pane_id"))?;
+    herdr_json(&["pane", "run", pane_id, &cmd])?;
+    println!("diff opened in {pane_id} ({})", renderer.unwrap_or("git diff"));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
+    #[test]
+    fn review_and_followup_and_clean_guards() {
+        let base = std::env::temp_dir().join(format!("herdr-worker-t06-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let root = base.join(".herdr-worker");
+        let t = root.join("tasks").join("0006-loop");
+        fs::create_dir_all(t.join("attempts")).unwrap();
+        fs::create_dir_all(t.join("comments")).unwrap();
+        fs::write(
+            t.join("task.md"),
+            "---\nid: 0006\ntitle: 闭环\nstatus: review\n---\n正文\n",
+        )
+        .unwrap();
+        fs::write(
+            t.join("attempts").join("1.md"),
+            "---\nn: 1\nagent: opencode\nbranch: hw/0006-loop\npane: w2:p1\nworkspace: w2\nagent_name: hw0006-1\nstatus: running\n---\n",
+        )
+        .unwrap();
+        fs::write(
+            t.join("comments").join("20260926-a.md"),
+            "---\nauthor: human\ntime: 09-26 10:00\nfile: src/a.rs\n---\n这里要判空\n",
+        )
+        .unwrap();
+        fs::write(
+            t.join("comments").join("20260926-b.md"),
+            "---\nauthor: human\ntime: 09-26 10:01\ndelivered: true\n---\n旧反馈\n",
+        )
+        .unwrap();
+
+        let board = model::load_board(&root).unwrap();
+
+        // r：非 review 报错
+        // （当前就是 review，直接测确认流程的纯文件段）—— confirm_review 会调 herdr？不会：它只写文件
+        confirm_review(&root, 6).unwrap();
+        let board = model::load_board(&root).unwrap();
+        assert_eq!(board.tasks[0].status, "done");
+        assert!(confirm_review(&root, 6).is_err(), "done 列再按 r 应报错");
+
+        // f：准备段组合未投递评论（b 已投递，只带 a）
+        let board = model::load_board(&root).unwrap();
+        // 把任务挪回 in-progress 以便 follow_up（直接改文件模拟 sync）
+        write::set_field(&root.join("tasks").join("0006-loop").join("task.md"), "status", "in-progress").unwrap();
+        let board = model::load_board(&root).unwrap();
+        let (name, text, files) = prepare_follow_up(&board, 6).unwrap();
+        assert_eq!(name, "hw0006-1");
+        assert!(text.contains("（位置 src/a.rs）这里要判空"), "文本应含位置与内容：{text}");
+        assert!(!text.contains("旧反馈"), "已投递评论不得重复携带");
+        assert_eq!(files.len(), 1);
+        assert!(files[0].to_string_lossy().contains("20260926-a.md"));
+
+        // f：没有未投递评论时报错（标记 a 为已投递后再试）
+        write::set_field(&files[0], "delivered", "true").unwrap();
+        let board = model::load_board(&root).unwrap();
+        assert!(prepare_follow_up(&board, 6).is_err());
+
+        // c：分支前缀校验（换成非插件前缀应拒绝）
+        let board = model::load_board(&root).unwrap();
+        assert!(validate_clean(&board, 6).is_ok());
+        fs::write(
+            t.join("attempts").join("1.md"),
+            "---\nn: 1\nagent: opencode\nbranch: feature/other\npane: w2:p1\nworkspace: w2\nagent_name: hw0006-1\nstatus: done\n---\n",
+        )
+        .unwrap();
+        let board = model::load_board(&root).unwrap();
+        assert!(validate_clean(&board, 6).is_err(), "非插件前缀的 worktree 拒绝清理");
+
+        fs::remove_dir_all(&base).unwrap();
+    }
 
     #[test]
     fn footer_has_coordinates() {

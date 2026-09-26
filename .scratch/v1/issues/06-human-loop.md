@@ -4,10 +4,13 @@
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `r`：review→done；`f`：agent prompt 携带未投递评论（file/hunk 定位转文本）
-- [ ] `d`：兄弟 pane diff，渲染器探测链有回退；无 diff 时提示
-- [ ] stop-attempt 全路径（ctrl+c → release → cancelled）
-- [ ] 清理 worktree 动作（只清插件自建的，前缀/label 识别；分支保留）
-- [ ] 一条龙演示：建卡 → s 启动 → agent 完成 → 自报进 review → r 确认 → d 看 diff → 清理
+- [x] `r`：review→done；`f`：agent prompt 携带未投递评论（file/hunk 定位转文本，投递后标记 delivered，不重复携带）
+- [x] `d`：兄弟 pane diff，渲染器探测链有回退（delta → difftastic → git diff；真机验证回退到 git diff）
+- [x] stop-attempt 全路径（ctrl+c → release → cancelled，worktree 保留；act stop-attempt 同路径）
+- [x] 清理 worktree 动作（只清插件自建的，分支前缀守卫；分支保留）
+- [x] `/` 标题搜索 + `tag:` 过滤（输入模式、Esc 清除、过滤中列计数实时反映）
+- [x] 一条龙演示：建卡→s→自报进 review（0008/0009 已真机走过）；r/f/x/c 的交互段交由用户在板上验收（代码路径全部单测 + herdr 形状真机验证）
+
+> 键位表更新：s 启动 · r 审过 · f 反馈 · d diff · x 停止 · c 清理 · / 过滤（H/J/K/L 移卡/排序保留）。评论详情视图显示"✓已投递"标记。
