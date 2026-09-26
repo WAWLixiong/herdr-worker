@@ -186,7 +186,7 @@ pub fn start_attempt(
             for _ in 0..8 {
                 std::thread::sleep(std::time::Duration::from_millis(700));
                 if let Some(st) = agent_status_of(&agent_name) {
-                    if matches!(st, "working" | "blocked") {
+                    if matches!(st.as_str(), "working" | "blocked") {
                         landed = true;
                         break;
                     }
