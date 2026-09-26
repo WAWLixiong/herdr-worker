@@ -142,6 +142,11 @@ pub fn start_attempt(
             let _ = std::fs::remove_file(&att_path);
             bail!("agent start 失败（attempt 已回滚；worktree {} 保留，可手动清理）：{e}", workspace_id);
         }
+        // 时序修复：agent start 返回"就绪"≠输入框可用（欢迎屏初始化期粘贴会被吞）；
+        // 等 idle 再发 prompt。超时/失败则照发（宁可迟发不可不发）。
+        let _ = herdr_json(&[
+            "agent", "wait", &agent_name, "--until", "idle", "--timeout", "15000",
+        ]);
 
         // 4) agent prompt：正文 + API 页脚
         let prompt = format!(
