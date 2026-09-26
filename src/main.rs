@@ -5,6 +5,7 @@ mod frontmatter;
 mod lock;
 mod model;
 mod orchestrate;
+mod sync;
 mod tui;
 mod write;
 
@@ -32,6 +33,7 @@ fn main() -> anyhow::Result<()> {
             tui::run(board)
         }
         Some("act") => act::run(&args[1..]),
+        Some("sync") => sync::run(),
         _ => {
             eprintln!("用法：herdr-worker board [--path DIR] | act <action> [--flags]");
             std::process::exit(2);

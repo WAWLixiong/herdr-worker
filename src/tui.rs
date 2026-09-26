@@ -40,9 +40,16 @@ fn trunc(s: &str, width: usize) -> String {
     out
 }
 
-fn attempt_badge(status: &str) -> Option<(&'static str, Color)> {
-    match status {
-        "running" => Some(("▶ running", Color::Cyan)),
+fn attempt_badge(att: Option<&crate::model::Attempt>) -> Option<(&'static str, Color)> {
+    let a = att?;
+    match a.status.as_str() {
+        "running" => {
+            if a.agent_state.as_deref() == Some("idle") {
+                Some(("⏳ 空闲待确认", Color::Yellow))
+            } else {
+                Some(("▶ running", Color::Cyan))
+            }
+        }
         "blocked" => Some(("⛔ blocked", Color::Red)),
         "done" => Some(("✓ done", Color::Green)),
         "failed" => Some(("✗ failed", Color::Magenta)),
@@ -91,7 +98,7 @@ fn card_lines(board: &Board, task_idx: usize, width: usize) -> Vec<Line<'static>
 
     let att = task.latest_attempt();
     let mut meta = att.map(|a| a.agent.clone()).unwrap_or_default();
-    if let Some((badge, _)) = att.and_then(|a| attempt_badge(&a.status)) {
+    if let Some((badge, _)) = attempt_badge(att) {
         meta.push(' ');
         meta.push_str(badge);
     }
@@ -99,7 +106,7 @@ fn card_lines(board: &Board, task_idx: usize, width: usize) -> Vec<Line<'static>
         meta.push_str(&format!(" #{}", task.attempts.len()));
     }
     let meta_color = att
-        .and_then(|a| attempt_badge(&a.status))
+        .and_then(|a| attempt_badge(Some(a)))
         .map(|(_, c)| c)
         .unwrap_or(Color::DarkGray);
     lines.push(Line::from(Span::styled(
@@ -171,8 +178,8 @@ fn detail_text(board: &Board, task_idx: usize) -> Text<'static> {
         lines.push(Line::from(Span::styled("  （尚未启动）", Style::new().fg(Color::DarkGray))));
     }
     for a in &t.attempts {
-        let color = attempt_badge(&a.status).map(|(_, c)| c).unwrap_or(Color::Gray);
-        let badge = attempt_badge(&a.status).map(|(b, _)| b).unwrap_or(&a.status);
+        let color = attempt_badge(Some(a)).map(|(_, c)| c).unwrap_or(Color::Gray);
+        let badge = attempt_badge(Some(a)).map(|(b, _)| b).unwrap_or(&a.status);
         let usage = a.usage.as_deref().map(|u| format!("  ⚡{u}")).unwrap_or_default();
         lines.push(Line::from(Span::styled(
             format!("  #{} {} {}  {}{}", a.n, a.agent, a.branch, badge, usage),

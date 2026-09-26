@@ -54,6 +54,8 @@ pub struct Attempt {
     pub pane: Option<String>,
     pub workspace: Option<String>,
     pub agent_name: Option<String>,
+    /// 活子状态：sync 写入 "idle"（agent 空闲但未自报终态）；working/blocked 时清除
+    pub agent_state: Option<String>,
     pub started: Option<String>,
     pub ended: Option<String>,
     pub status: String,
@@ -311,6 +313,10 @@ fn load_attempts(dir: &Path) -> Result<Vec<Attempt>> {
             agent_name: m
                 .as_ref()
                 .and_then(|m| m.str("agent_name"))
+                .map(String::from),
+            agent_state: m
+                .as_ref()
+                .and_then(|m| m.str("agent_state"))
                 .map(String::from),
             started: m.as_ref().and_then(|m| m.str("started")).map(String::from),
             ended: m.as_ref().and_then(|m| m.str("ended")).map(String::from),

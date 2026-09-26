@@ -16,3 +16,16 @@ id = "open-board"
 title = "Open Board"
 contexts = ["global"]
 command = ["target/release/herdr-worker", "act", "open-board"]
+
+# 事件大脑（只注册携带状态信息的事件；worktree.created/opened 是编排自身动作，注册=白费进程）
+[[events]]
+on = "pane.agent_status_changed"
+command = ["target/release/herdr-worker", "sync"]
+
+[[events]]
+on = "pane.exited"
+command = ["target/release/herdr-worker", "sync"]
+
+[[events]]
+on = "worktree.removed"
+command = ["target/release/herdr-worker", "sync"]
