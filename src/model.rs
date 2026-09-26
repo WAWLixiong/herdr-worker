@@ -139,7 +139,21 @@ pub fn fs_snapshot(root: &Path) -> Vec<(PathBuf, std::time::SystemTime)> {
     out
 }
 
-/// 从 start 向上查找 `.herdr-worker/`
+/// 板进程的 pane-id 登记文件（去重用）：按板根路径分文件，多仓库互不干扰。
+/// 需要 HERDR_PLUGIN_STATE_DIR（插件运行时环境注入）；普通运行返回 None。
+pub fn board_state_file(board_root: &Path) -> Option<PathBuf> {
+    let dir = std::env::var("HERDR_PLUGIN_STATE_DIR").ok()?;
+    let sanitized: String = board_root
+        .display()
+        .to_string()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let name: String = sanitized.chars().take(100).collect();
+    Some(PathBuf::from(dir).join(format!("board-{name}.txt")))
+}
+
+/// 从 pivot 向上查找 `.herdr-worker/`
 pub fn find_board(start: &Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
     loop {

@@ -428,6 +428,27 @@ fn report_result(args: &[String]) -> Result<()> {
 
 fn open_board() -> Result<()> {
     let bin = std::env::var("HERDR_BIN_PATH").unwrap_or_else(|_| "herdr".to_string());
+    // 去重：板上已开则聚焦，不重复开
+    let board_root = std::env::current_dir()
+        .ok()
+        .and_then(|d| crate::model::find_board(&d));
+    if let Some(root) = &board_root {
+        if let Some(state) = crate::model::board_state_file(root) {
+            if let Ok(existing) = std::fs::read_to_string(&state) {
+                let existing = existing.trim();
+                if !existing.is_empty() {
+                    let focused = std::process::Command::new(&bin)
+                        .args(["plugin", "pane", "focus", existing])
+                        .output();
+                    if matches!(&focused, Ok(o) if o.status.success()) {
+                        println!("board already open, focused {existing}");
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+    // 未开（或登记已失效）→ 打开新板并登记 pane id
     let out = std::process::Command::new(&bin)
         .args(["plugin", "pane", "open", "--plugin", "herdr-worker", "--entrypoint", "board"])
         .output()
@@ -436,6 +457,18 @@ fn open_board() -> Result<()> {
     std::io::Write::write_all(&mut std::io::stderr(), &out.stderr)?;
     if !out.status.success() {
         bail!("plugin pane open 退出码 {:?}", out.status.code());
+    }
+    if let Some(root) = &board_root {
+        if let Some(state) = crate::model::board_state_file(root) {
+            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
+                if let Some(pane_id) = v
+                    .pointer("/result/plugin_pane/pane/pane_id")
+                    .and_then(|s| s.as_str())
+                {
+                    let _ = std::fs::write(state, pane_id);
+                }
+            }
+        }
     }
     Ok(())
 }

@@ -459,6 +459,12 @@ fn reorder(board: &Board, st: &mut UiState, delta: i32) {
 }
 
 pub fn run(mut board: Board) -> Result<()> {
+    // 登记 pane id（open-board 动作据此去重：已开则聚焦）
+    if let (Ok(pane_id), Some(state)) =
+        (std::env::var("HERDR_PANE_ID"), crate::model::board_state_file(&board.root))
+    {
+        let _ = std::fs::write(state, pane_id);
+    }
     let mut st = UiState { sel: 0, sel_col: 0, detail: false, error: None, filter: None, input: None, input_kind: InputKind::Filter, select_next: None };
     // 初始选中：第一张可见卡
     if !board.tasks.is_empty() {
