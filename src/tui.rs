@@ -387,7 +387,7 @@ pub fn snapshot(board: &Board, st: &UiState, path: &std::path::Path, w: u16, h: 
     Ok(())
 }
 
-/// 通用动作执行器：对选中任务执行 op，失败红条显示在头部
+/// 通用动作执行器：对选中任务执行 op，失败红条显示在头部 + 完整错误链落盘（调试用）
 fn run_action(
     board: &Board,
     st: &mut UiState,
@@ -397,7 +397,16 @@ fn run_action(
         let root = board.root.clone();
         match op(&root, id) {
             Ok(_) => st.error = None,
-            Err(e) => st.error = Some(e.to_string()),
+            Err(e) => {
+                st.error = Some(e.to_string());
+                let _ = std::fs::write(
+                    std::env::temp_dir().join("herdr-worker-debug.log"),
+                    format!(
+                        "[{}] task {id:04} action error: {e:?}\n",
+                        crate::write::utc_now_rfc3339()
+                    ),
+                );
+            }
         }
     }
 }
@@ -547,16 +556,9 @@ pub fn run(mut board: Board) -> Result<()> {
                     KeyCode::Char('L') => move_to_col(&board, &mut st, 1),
                     KeyCode::Char('J') => reorder(&board, &mut st, 1),
                     KeyCode::Char('K') => reorder(&board, &mut st, -1),
-                    KeyCode::Char('s') => {
-                        // 启动 attempt：全托管三步（失败红条显示在头部）
-                        if let Some(id) = board.tasks.get(st.sel).map(|t| t.id) {
-                            let root = board.root.clone();
-                            match crate::orchestrate::start_attempt(&root, id, None) {
-                                Ok(_) => st.error = None,
-                                Err(e) => st.error = Some(e.to_string()),
-                            }
-                        }
-                    }
+                    KeyCode::Char('s') => run_action(&board, &mut st, |r, id| {
+                        crate::orchestrate::start_attempt(r, id, None).map(|_| ())
+                    }),
                     KeyCode::Char('r') => run_action(&board, &mut st, crate::orchestrate::confirm_review),
                     KeyCode::Char('f') => run_action(&board, &mut st, |r, id| {
                         crate::orchestrate::follow_up(r, id).map(|_| ())

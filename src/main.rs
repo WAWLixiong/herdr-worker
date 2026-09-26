@@ -39,6 +39,23 @@ fn main() -> anyhow::Result<()> {
             let cmd = std::env::var("HW_DIFF_CMD").map_err(|_| {
                 anyhow::anyhow!("diff 子命令需要 HW_DIFF_CMD 环境变量（由板上按 d 注入）")
             })?;
+            // 空 diff 不闪屏：worktree 相对 HEAD 无变化时，提示并等回车再合拢
+            if let Ok(dir) = std::env::var("HW_DIFF_DIR") {
+                let quiet = std::process::Command::new("git")
+                    .args(["-C", &dir, "diff", "HEAD", "--quiet"])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+                if matches!(quiet, Ok(s) if s.success()) {
+                    println!("（该 worktree 相对 HEAD 无差异）");
+                    print!("按回车关闭…");
+                    use std::io::Write;
+                    let _ = std::io::stdout().flush();
+                    let mut line = String::new();
+                    let _ = std::io::stdin().read_line(&mut line);
+                    std::process::exit(0);
+                }
+            }
             let shell: (&str, &str) = if cfg!(windows) {
                 ("cmd", "/c")
             } else {

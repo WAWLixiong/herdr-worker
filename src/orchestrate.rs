@@ -502,6 +502,7 @@ pub fn open_diff(board_root: &Path, task_id: u32) -> Result<()> {
         "--entrypoint", "diff",
         "--placement", "overlay",
         "--env", &format!("HW_DIFF_CMD={cmd}"),
+        "--env", &format!("HW_DIFF_DIR={path}"),
     ])?;
     Ok(())
 }
