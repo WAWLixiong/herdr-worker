@@ -4,10 +4,12 @@
 
 **Blocked by:** 02, 03
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 三步编排 + 每步错误处理（herdr 不可达 / worktree 失败 / agent start 失败时回滚 attempt 文件）
-- [ ] attempt 文件记录 agent/branch/started/status + pane 与 workspace 标识（供 05 事件定位）
-- [ ] 启动后任务自动入 in-progress；侧栏出现 chip
-- [ ] `act start-attempt` 同路径；重复启动（已有活 attempt）被拒绝并提示
-- [ ] 真机端到端：按 s 后 worktree 出现、agent 跑起来、卡片与 chip 正确
+- [x] 三步编排 + 每步错误处理（herdr 不可达 / worktree 失败 / agent start 失败时回滚 attempt 文件）
+- [x] attempt 文件记录 agent/branch/started/status + pane 与 workspace 标识（供 05 事件定位）；report-result 重写时保留锚点字段
+- [x] 启动后任务自动入 in-progress；侧栏出现 chip
+- [x] `act start-attempt` 同路径；重复启动（已有活 attempt）被拒绝并提示
+- [x] 真机端到端：按 s 后 worktree 出现、agent 跑起来、卡片与 chip 正确
+
+> e2e 发现并修复：agent start 的"就绪"早于 opencode 欢迎屏可接收输入，首条 prompt 会被吞成草稿——编排改为等 idle（上限 15s）再 prompt（commit 12b792e）。另：prompt 页脚携带 API 坐标（二进制绝对路径 + 主板 --path + id/attempt），弥补 worktree 内无 target/ 与 .herdr-worker 副本歧义。
