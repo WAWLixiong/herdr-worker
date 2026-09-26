@@ -89,6 +89,8 @@ Everything is committed to git by default (clone = the whole board; agents self-
 | `↑↓` / `j k` | move between cards |
 | `Enter` / `Esc` | open detail overlay / close it (Esc also clears the filter) |
 | `q` | quit the board (the only quit key — overlay panes may deliver an Esc-like event at startup, so Esc never quits) |
+| `n` | new task: type a title, `#tag` words become tags (lands in `todo`) |
+| `e` | edit the task body in `$EDITOR` (sibling pane) |
 | `s` | start attempt (worktree + agent + prompt) |
 | `r` | confirm a reviewed task into `done` |
 | `f` | follow-up: deliver undelivered comments to the agent |

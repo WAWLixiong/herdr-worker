@@ -125,7 +125,7 @@ command = ["herdr-worker", "sync"]       #        worktree.opened / worktree.rem
 
 - **主看板 = 经典看板**：列卡片墙；卡片三行（id+标题 / agent+状态徽章+attempt 数 / 标签+usage）
 - **详情 = Enter 浮层，主从排版**：meta → 正文（prompt）→ attempts 时间线 → comments（人绿 agent 蓝）→ `d` 提示
-- **键位**：`←→/hjkl` 列 · `↑↓/jk` 卡 · `Enter/Esc` 详情 · `s` 启动 · `r` 自报审阅 · `d` diff→兄弟 pane · `f` follow-up prompt（自动携带未投递评论）· `/` 标题搜索 · `tag:` 过滤 · `H/J/K/L` 移卡到相邻列 · `q`
+- **键位**：`←→/hjkl` 列 · `↑↓/jk` 卡 · `Enter/Esc` 详情 · `n` 新建（标题+内联 `#tag`，落 todo，建后跳选） · `e` 编辑正文（兄弟 pane 开 `$EDITOR`） · `s` 启动 · `r` 自报审阅 · `d` diff→兄弟 pane · `f` follow-up prompt（自动携带未投递评论）· `/` 标题搜索 · `tag:` 过滤 · `H/J/K/L` 移卡到相邻列 · `q`（唯一退出键，Esc 只关详情/清过滤）
 - 鼠标交互不作 v1 承诺（实现期验证 herdr pane 鼠标事件能力）
 
 ## 8. 主动提醒

@@ -197,25 +197,36 @@ fn create_task(args: &[String]) -> Result<()> {
         .collect();
     let body = read_body(&flags)?;
     let root = board_root(&flags)?;
+    let id = create_task_core(&root, &title, &tags, &status, &body)?;
+    println!("created {id:04}");
+    Ok(())
+}
 
-    with_lock(&root, || {
-        // 校验列名（含隐藏列）
-        let board = model::load_board(&root)?;
-        if !board.columns.iter().any(|(n, _)| n == &status) {
+/// 创建核心（TUI 的 n 键与 act create-task 共用）：锁内分配 id、写 task.md
+pub fn create_task_core(
+    root: &Path,
+    title: &str,
+    tags: &[String],
+    status: &str,
+    body: &str,
+) -> Result<u32> {
+    with_lock(root, || {
+        let board = model::load_board(root)?;
+        if !board.columns.iter().any(|(n, _)| n == status) {
             bail!(
                 "未知列 {status}；board.md 声明的列：{}",
                 board.columns.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ")
             );
         }
-        let id = next_id(&root);
+        let id = next_id(root);
         let dir = root
             .join("tasks")
-            .join(format!("{:04}-{}", id, slugify(&title)));
+            .join(format!("{:04}-{}", id, slugify(title)));
         fs::create_dir_all(&dir)?;
         let now = write::utc_now_rfc3339();
         let mut fm = String::from("---\n");
         fm.push_str(&format!("id: {:04}\n", id));
-        fm.push_str(&format!("title: {}\n", yaml_str(&title)));
+        fm.push_str(&format!("title: {}\n", yaml_str(title)));
         fm.push_str(&format!("status: {status}\n"));
         if !tags.is_empty() {
             let quoted: Vec<String> = tags.iter().map(|t| yaml_str(t)).collect();
@@ -224,13 +235,12 @@ fn create_task(args: &[String]) -> Result<()> {
         fm.push_str(&format!("created: {now}\n"));
         fm.push_str(&format!("updated: {now}\n"));
         fm.push_str("---\n\n");
-        fm.push_str(&body);
+        fm.push_str(body);
         if !body.ends_with('\n') {
             fm.push('\n');
         }
         fs::write(dir.join("task.md"), fm)?;
-        println!("created {:04} {}", id, dir.display());
-        Ok(())
+        Ok(id)
     })
 }
 

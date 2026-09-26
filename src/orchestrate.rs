@@ -1,4 +1,4 @@
-// 编排：s 键三步全托管（SPEC §5）
+﻿// 编排：s 键三步全托管（SPEC §5）
 // worktree create → attempt 文件 → agent start → agent prompt → 自动 in-progress → 侧栏 chip
 // agent prompt = 任务正文 + API 坐标页脚（二进制绝对路径 + 主板 --path + 本任务 id/attempt）
 
@@ -419,6 +419,47 @@ pub fn clean_worktree(board_root: &Path, task_id: u32) -> Result<()> {
     Ok(())
 }
 
+/// e：在兄弟 pane 打开 $EDITOR 编辑选中任务的 task.md（与 d 开 diff 同构）
+pub fn open_editor(board_root: &Path, task_id: u32) -> Result<()> {
+    let board = model::load_board(board_root)?;
+    let path = board
+        .task_path(task_id)
+        .ok_or_else(|| anyhow::anyhow!("找不到任务文件"))?;
+    let editor = std::env::var("EDITOR")
+        .ok()
+        .filter(|e| !e.is_empty())
+        .unwrap_or_else(|| {
+            if cfg!(windows) {
+                "notepad".to_string()
+            } else {
+                "vi".to_string()
+            }
+        });
+    let cmd = format!("{editor} \"{}\"", path.display());
+
+    // 板若以 overlay（放大层）打开：先解除自身放大，编辑器 pane 才可见
+    if let Ok(self_pane) = std::env::var("HERDR_PANE_ID") {
+        let _ = herdr_json(&["pane", "zoom", "--pane", &self_pane, "--off"]);
+    }
+    let split = herdr_json(&[
+        "pane", "split", "--current", "--direction", "right", "--no-focus",
+    ])?;
+    let pane_id = ["/result/pane/pane_id", "/result/pane_id", "/result/root_pane/pane_id"]
+        .iter()
+        .find_map(|p| split.pointer(p).and_then(|v| v.as_str()))
+        .ok_or_else(|| anyhow::anyhow!("pane split 响应缺 pane_id"))?
+        .to_string();
+    herdr_json(&["pane", "run", &pane_id, &cmd])?;
+    // 编辑器需要输入焦点：方向式聚焦到右侧新 pane
+    if let Ok(self_pane) = std::env::var("HERDR_PANE_ID") {
+        let _ = herdr_json(&["pane", "focus", "--direction", "right", "--pane", &self_pane]);
+    } else {
+        let _ = herdr_json(&["pane", "focus", "--direction", "right", "--current"]);
+    }
+    println!("editor opened in {pane_id} ({editor})");
+    Ok(())
+}
+
 /// d：在兄弟 pane 打开任务 worktree 的 diff（delta → difftastic → git diff 回退）
 pub fn open_diff(board_root: &Path, task_id: u32) -> Result<()> {
     let board = model::load_board(board_root)?;
@@ -526,7 +567,6 @@ mod tests {
         assert!(confirm_review(&root, 6).is_err(), "done 列再按 r 应报错");
 
         // f：准备段组合未投递评论（b 已投递，只带 a）
-        let board = model::load_board(&root).unwrap();
         // 把任务挪回 in-progress 以便 follow_up（直接改文件模拟 sync）
         write::set_field(&root.join("tasks").join("0006-loop").join("task.md"), "status", "in-progress").unwrap();
         let board = model::load_board(&root).unwrap();

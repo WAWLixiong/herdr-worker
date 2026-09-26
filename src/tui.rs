@@ -18,6 +18,12 @@ use unicode_width::UnicodeWidthChar;
 
 use crate::model::Board;
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum InputKind {
+    Filter,
+    NewTitle,
+}
+
 pub struct UiState {
     pub sel: usize,
     pub sel_col: usize,
@@ -25,8 +31,11 @@ pub struct UiState {
     pub error: Option<String>,
     /// 已应用的过滤（标题子串 或 tag:xxx）
     pub filter: Option<String>,
-    /// 搜索输入模式（Some = 正在输入）
+    /// 输入模式（Some = 正在输入）
     pub input: Option<String>,
+    pub input_kind: InputKind,
+    /// 建卡后跳选：watcher 重载时消费
+    pub select_next: Option<u32>,
 }
 
 fn trunc(s: &str, width: usize) -> String {
@@ -62,7 +71,7 @@ fn attempt_badge(att: Option<&crate::model::Attempt>) -> Option<(&'static str, C
     }
 }
 
-fn header_line(board: &Board, error: &Option<String>, filter: &Option<String>, input: &Option<String>) -> Line<'static> {
+fn header_line(board: &Board, error: &Option<String>, filter: &Option<String>, input: &Option<String>, kind: &InputKind) -> Line<'static> {
     let repo = board
         .root
         .parent()
@@ -81,9 +90,20 @@ fn header_line(board: &Board, error: &Option<String>, filter: &Option<String>, i
         ));
     }
     if let Some(inp) = input {
-        spans.push(Span::raw("  /"));
-        spans.push(Span::styled(inp.clone(), Style::new().fg(Color::White).bold()));
-        spans.push(Span::styled("_", Style::new().fg(Color::DarkGray)));
+        match kind {
+            InputKind::Filter => {
+                spans.push(Span::raw("  /"));
+                spans.push(Span::styled(inp.clone(), Style::new().fg(Color::White).bold()));
+                spans.push(Span::styled("_", Style::new().fg(Color::DarkGray)));
+            }
+            InputKind::NewTitle => {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(" 新任务 ", Style::new().fg(Color::Black).bg(Color::Green).bold()));
+                spans.push(Span::styled(inp.clone(), Style::new().fg(Color::White).bold()));
+                spans.push(Span::styled("_", Style::new().fg(Color::DarkGray)));
+                spans.push(Span::styled(" (#tag 收标签 · Enter 建卡 · Esc 取消)", Style::new().fg(Color::DarkGray)));
+            }
+        }
     }
     if let Some(e) = error {
         spans.push(Span::raw("  "));
@@ -104,9 +124,26 @@ fn matches_filter(t: &crate::model::Task, f: &Option<String>) -> bool {
     t.title.contains(f.as_str())
 }
 
+/// 从一行输入提取 标题 + 内联 #标签：`修复登录页 #bug #frontend`
+/// → ("修复登录页", ["bug", "frontend"])
+fn extract_title_tags(input: &str) -> (String, Vec<String>) {
+    let mut title_parts: Vec<&str> = Vec::new();
+    let mut tags: Vec<String> = Vec::new();
+    for tok in input.split_whitespace() {
+        if let Some(t) = tok.strip_prefix('#') {
+            if !t.is_empty() {
+                tags.push(t.to_string());
+                continue;
+            }
+        }
+        title_parts.push(tok);
+    }
+    (title_parts.join(" "), tags)
+}
+
 fn help_line() -> Line<'static> {
     Line::from(Span::styled(
-        " ←→/hjkl 列 · ↑↓/jk 卡 · s 启动 · r 审过 · f 反馈 · d diff · x 停止 · c 清理 · / 过滤 · H/J/K/L 移卡 · Enter 详情 · q 退出",
+        " ←→/hjkl 列 · ↑↓/jk 卡 · n 新建 · e 编辑 · s 启动 · r 审过 · f 反馈 · d diff · x 停止 · c 清理 · / 过滤 · H/J/K/L 移卡 · Enter 详情 · q 退出",
         Style::new().fg(Color::DarkGray),
     ))
 }
@@ -253,7 +290,7 @@ pub fn render(f: &mut Frame, board: &Board, st: &UiState) {
         Constraint::Length(1),
     ])
     .split(area);
-    f.render_widget(Paragraph::new(header_line(board, &st.error, &st.filter, &st.input)), rows[0]);
+    f.render_widget(Paragraph::new(header_line(board, &st.error, &st.filter, &st.input, &st.input_kind)), rows[0]);
 
     let columns = board.visible_columns();
     let col_areas = Layout::horizontal(vec![Constraint::Fill(1); columns.len().max(1)])
@@ -413,7 +450,7 @@ fn reorder(board: &Board, st: &mut UiState, delta: i32) {
 }
 
 pub fn run(mut board: Board) -> Result<()> {
-    let mut st = UiState { sel: 0, sel_col: 0, detail: false, error: None, filter: None, input: None };
+    let mut st = UiState { sel: 0, sel_col: 0, detail: false, error: None, filter: None, input: None, input_kind: InputKind::Filter, select_next: None };
     // 初始选中：第一张可见卡
     if !board.tasks.is_empty() {
         let cols = board.visible_columns();
@@ -439,16 +476,34 @@ pub fn run(mut board: Board) -> Result<()> {
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
-                // 搜索输入模式：吃掉所有按键
+                // 输入模式：吃掉所有按键（过滤 / 新建标题）
                 if let Some(inp) = st.input.as_mut() {
                     match key.code {
-                        KeyCode::Enter => {
-                            st.filter = if inp.is_empty() { None } else { Some(inp.clone()) };
-                            st.input = None;
-                        }
+                        KeyCode::Enter => match st.input_kind {
+                            InputKind::Filter => {
+                                st.filter = if inp.is_empty() { None } else { Some(inp.clone()) };
+                                st.input = None;
+                            }
+                            InputKind::NewTitle => {
+                                let (title, tags) = extract_title_tags(inp);
+                                st.input = None;
+                                if !title.is_empty() {
+                                    let root = board.root.clone();
+                                    match crate::act::create_task_core(&root, &title, &tags, "todo", "") {
+                                        Ok(id) => {
+                                            st.error = None;
+                                            st.select_next = Some(id);
+                                        }
+                                        Err(e) => st.error = Some(e.to_string()),
+                                    }
+                                }
+                            }
+                        },
                         KeyCode::Esc => {
+                            if st.input_kind == InputKind::Filter {
+                                st.filter = None;
+                            }
                             st.input = None;
-                            st.filter = None;
                         }
                         KeyCode::Backspace => {
                             inp.pop();
@@ -509,7 +564,15 @@ pub fn run(mut board: Board) -> Result<()> {
                     KeyCode::Char('d') => run_action(&board, &mut st, crate::orchestrate::open_diff),
                     KeyCode::Char('x') => run_action(&board, &mut st, crate::orchestrate::stop_attempt),
                     KeyCode::Char('c') => run_action(&board, &mut st, crate::orchestrate::clean_worktree),
-                    KeyCode::Char('/') => st.input = Some(String::new()),
+                    KeyCode::Char('e') => run_action(&board, &mut st, crate::orchestrate::open_editor),
+                    KeyCode::Char('/') => {
+                        st.input = Some(String::new());
+                        st.input_kind = InputKind::Filter;
+                    }
+                    KeyCode::Char('n') => {
+                        st.input = Some(String::new());
+                        st.input_kind = InputKind::NewTitle;
+                    }
                 KeyCode::Up | KeyCode::Char('k') => {
                     if st.sel_col < columns.len() {
                         let idxs: Vec<usize> = board
@@ -542,14 +605,16 @@ pub fn run(mut board: Board) -> Result<()> {
                 }
             }
         }
-        // 轮询监听：.herdr-worker/ 变化 → 重载（选中和列保持稳定）
+        // 轮询监听：.herdr-worker/ 变化 → 重载（选中和列保持稳定；建卡跳选优先）
         let snap = crate::model::fs_snapshot(&board.root);
         if snap != last_snap {
             last_snap = snap;
             let sel_id = board.tasks.get(st.sel).map(|t| t.id);
             if let Ok(nb) = crate::model::load_board(&board.root) {
                 board = nb;
-                st.sel = sel_id
+                let jump = st.select_next.take();
+                let target = jump.or(sel_id);
+                st.sel = target
                     .and_then(|id| board.tasks.iter().position(|t| t.id == id))
                     .unwrap_or_else(|| st.sel.min(board.tasks.len().saturating_sub(1)));
                 if let Some(t) = board.tasks.get(st.sel) {
@@ -576,6 +641,26 @@ mod tests {
     use super::*;
     use crate::model::load_board;
     use std::fs;
+
+    #[test]
+    fn title_tag_extraction() {
+        assert_eq!(
+            extract_title_tags("修复登录页 #bug #frontend"),
+            ("修复登录页".to_string(), vec!["bug".to_string(), "frontend".to_string()])
+        );
+        assert_eq!(
+            extract_title_tags("纯标题无标签"),
+            ("纯标题无标签".to_string(), vec![])
+        );
+        // 只有 # 开头的词才是标签；词中含 # 不算（如 C#）
+        assert_eq!(
+            extract_title_tags("C# 语法高亮 #parser"),
+            ("C# 语法高亮".to_string(), vec!["parser".to_string()])
+        );
+        // 孤立 # 留在标题
+        assert_eq!(extract_title_tags("# 标题"), ("# 标题".to_string(), vec![]));
+        assert_eq!(extract_title_tags(""), (String::new(), vec![]));
+    }
 
     #[test]
     fn filter_predicate() {
@@ -624,7 +709,7 @@ mod tests {
 
         let backend = TestBackend::new(160, 30);
         let mut terminal = Terminal::new(backend).unwrap();
-        let st = UiState { sel: 0, sel_col: 1, detail: false, error: None, filter: None, input: None };
+        let st = UiState { sel: 0, sel_col: 1, detail: false, error: None, filter: None, input: None, input_kind: InputKind::Filter, select_next: None };
         terminal.draw(|f| render(f, &board, &st)).unwrap();
         let text = buffer_text(terminal.backend().buffer());
         assert!(text.contains("修复登录页偶发白屏"), "看板帧应含任务标题");
@@ -632,7 +717,7 @@ mod tests {
         assert!(text.contains("⛔ blocked"), "看板帧应含 blocked 徽章");
         assert!(text.contains("5k tok"), "看板帧应含用量");
 
-        let st = UiState { sel: 0, sel_col: 1, detail: true, error: None, filter: None, input: None };
+        let st = UiState { sel: 0, sel_col: 1, detail: true, error: None, filter: None, input: None, input_kind: InputKind::Filter, select_next: None };
         terminal.draw(|f| render(f, &board, &st)).unwrap();
         let text = buffer_text(terminal.backend().buffer());
         assert!(text.contains("attempts"), "详情帧应含 attempts 区");
@@ -658,7 +743,7 @@ mod tests {
         let board = load_board(&root).unwrap();
         // 选中 0001（order 0 排前）
         let sel = board.tasks.iter().position(|t| t.id == 1).unwrap();
-        let mut st = UiState { sel, sel_col: 0, detail: false, error: None, filter: None, input: None };
+        let mut st = UiState { sel, sel_col: 0, detail: false, error: None, filter: None, input: None, input_kind: InputKind::Filter, select_next: None };
 
         // J：列内交换，0001 与 0002 换位，整列 order 归一化
         reorder(&board, &mut st, 1);
@@ -670,7 +755,7 @@ mod tests {
         // L：todo → in-progress（重载后 0001 仍在 todo，order=1 排第二）
         let board = load_board(&root).unwrap();
         let sel = board.tasks.iter().position(|t| t.id == 1).unwrap();
-        let mut st = UiState { sel, sel_col: 0, detail: false, error: None, filter: None, input: None };
+        let mut st = UiState { sel, sel_col: 0, detail: false, error: None, filter: None, input: None, input_kind: InputKind::Filter, select_next: None };
         move_to_col(&board, &mut st, 1);
         let src = fs::read_to_string(root.join("tasks").join("0001-alpha").join("task.md")).unwrap();
         assert!(src.contains("status: in-progress"), "应已移入 in-progress：{src}");

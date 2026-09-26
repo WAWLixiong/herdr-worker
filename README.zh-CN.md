@@ -89,6 +89,8 @@ herdr plugin action invoke herdr-worker.open-board   # 打开 Board pane
 | `↑↓` / `j k` | 卡片间移动 |
 | `Enter` / `Esc` | 打开详情浮层 / 关闭（Esc 同时清除过滤） |
 | `q` | 退出板（唯一退出键——overlay pane 启动期可能收到类 Esc 事件，故 Esc 永不退出） |
+| `n` | 新建任务：输入标题，`#标签` 词自动收进 tags（落 `todo` 列） |
+| `e` | 在 `$EDITOR` 里编辑任务正文（兄弟 pane） |
 | `s` | 启动 attempt（worktree + agent + prompt） |
 | `r` | review 列确认入 done |
 | `f` | 追问：把未投递评论发给 agent |
