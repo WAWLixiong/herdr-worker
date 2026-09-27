@@ -33,6 +33,35 @@ fn main() -> anyhow::Result<()> {
             tui::run(board)
         }
         Some("act") => act::run(&args[1..]),
+        Some("editor") => {
+            // e 键的 overlay 编辑器：目标文件由 plugin pane open --env 注入。
+            // 直接用 argv 启动编辑器进程（不经 shell）——EDITOR 路径含空格不再有引号问题。
+            let file = std::env::var("HW_EDITOR_FILE").map_err(|_| {
+                anyhow::anyhow!("editor 子命令需要 HW_EDITOR_FILE 环境变量（由板上按 e 注入）")
+            })?;
+            let editor = std::env::var("EDITOR")
+                .ok()
+                .filter(|e| !e.is_empty())
+                .unwrap_or_else(|| {
+                    if cfg!(windows) {
+                        "notepad".to_string()
+                    } else {
+                        "vi".to_string()
+                    }
+                });
+            // EDITOR 整串是一个存在的路径 → 整体当程序（覆盖含空格路径）；
+            // 否则按空白切分（支持 "code -w" 这类带参数写法）
+            let argv: Vec<String> = if std::path::Path::new(&editor).exists() {
+                vec![editor]
+            } else {
+                editor.split_whitespace().map(String::from).collect()
+            };
+            let status = std::process::Command::new(&argv[0])
+                .args(&argv[1..])
+                .arg(&file)
+                .status()?;
+            std::process::exit(status.code().unwrap_or(0));
+        }
         Some("sync") => sync::run(),
         Some("diff") => {
             // d 键的 overlay diff：HW_DIFF_DIR 由 plugin pane open --env 注入。

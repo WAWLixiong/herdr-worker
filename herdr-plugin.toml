@@ -18,6 +18,13 @@ title = "Diff"
 placement = "overlay"
 command = ["target/release/herdr-worker", "diff"]
 
+# e 键的全屏编辑器 overlay：目标文件经 HW_EDITOR_FILE 注入；编辑器退出 → overlay 合拢回板
+[[panes]]
+id = "editor"
+title = "Editor"
+placement = "overlay"
+command = ["target/release/herdr-worker", "editor"]
+
 [[actions]]
 id = "open-board"
 title = "Open Board"

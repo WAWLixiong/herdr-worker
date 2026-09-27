@@ -408,51 +408,21 @@ pub fn clean_worktree(board_root: &Path, task_id: u32) -> Result<()> {
     Ok(())
 }
 
-/// e：在兄弟 pane 打开 $EDITOR 编辑选中任务的 task.md（与 d 开 diff 同构）
+/// e：以 overlay 全屏打开 $EDITOR 编辑选中任务的 task.md（与 d 同构）。
+/// 编辑器进程由 editor 子命令以 argv 直接启动（不经 shell，无引号问题）；
+/// 编辑器退出 → overlay 合拢回板。
 pub fn open_editor(board_root: &Path, task_id: u32) -> Result<()> {
     let board = model::load_board(board_root)?;
     let path = board
         .task_path(task_id)
         .ok_or_else(|| anyhow::anyhow!("找不到任务文件"))?;
-    let editor = std::env::var("EDITOR")
-        .ok()
-        .filter(|e| !e.is_empty())
-        .unwrap_or_else(|| {
-            if cfg!(windows) {
-                "notepad".to_string()
-            } else {
-                "vi".to_string()
-            }
-        });
-    // 编辑器路径含空格时给首 token 加引号（"D:\Program Files\...\nvim.exe" 会被
-    // shell 在空格处截断）；带参数写法（code -w）不受影响
-    let editor_cmd = match editor.split_once(' ') {
-        Some((first, rest)) if first.contains('\\') || first.contains('/') => {
-            format!("\"{first}\" {rest}")
-        }
-        _ => editor,
-    };
-    let cmd = format!("{editor_cmd} \"{}\"", path.display());
-
-    // 板若以 overlay（放大层）打开：先解除自身放大，编辑器 pane 才可见
-    if let Ok(self_pane) = std::env::var("HERDR_PANE_ID") {
-        let _ = herdr_json(&["pane", "zoom", "--pane", &self_pane, "--off"]);
-    }
-    let split = herdr_json(&[
-        "pane", "split", "--current", "--direction", "right", "--no-focus",
+    herdr_json(&[
+        "plugin", "pane", "open",
+        "--plugin", "herdr-worker",
+        "--entrypoint", "editor",
+        "--placement", "overlay",
+        "--env", &format!("HW_EDITOR_FILE={}", path.display()),
     ])?;
-    let pane_id = ["/result/pane/pane_id", "/result/pane_id", "/result/root_pane/pane_id"]
-        .iter()
-        .find_map(|p| split.pointer(p).and_then(|v| v.as_str()))
-        .ok_or_else(|| anyhow::anyhow!("pane split 响应缺 pane_id"))?
-        .to_string();
-    herdr_json(&["pane", "run", &pane_id, &cmd])?;
-    // 编辑器需要输入焦点：方向式聚焦到右侧新 pane
-    if let Ok(self_pane) = std::env::var("HERDR_PANE_ID") {
-        let _ = herdr_json(&["pane", "focus", "--direction", "right", "--pane", &self_pane]);
-    } else {
-        let _ = herdr_json(&["pane", "focus", "--direction", "right", "--current"]);
-    }
     Ok(())
 }
 
