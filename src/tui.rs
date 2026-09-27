@@ -4,7 +4,7 @@ use anyhow::Result;
 use ratatui::{
     backend::{CrosstermBackend, TestBackend},
     crossterm::{
-        event::{self, Event, KeyCode, KeyEventKind},
+        event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
         execute,
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     },
@@ -500,9 +500,26 @@ pub fn run(mut board: Board) -> Result<()> {
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
+                // Ctrl/Alt 组合键不作命令；SHIFT 归一化成大写字符——
+                // kitty 增强键盘协议报 Shift+D 为「小写 d + SHIFT 修饰」，
+                // 传统报法是大写 D，两种协议归一后大写命令键都能命中
+                if key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                {
+                    continue;
+                }
+                let code = if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    match key.code {
+                        KeyCode::Char(c) => KeyCode::Char(c.to_ascii_uppercase()),
+                        other => other,
+                    }
+                } else {
+                    key.code
+                };
                 // 输入模式：吃掉所有按键（过滤 / 新建标题）
                 if let Some(inp) = st.input.as_mut() {
-                    match key.code {
+                    match code {
                         KeyCode::Enter => match st.input_kind {
                             InputKind::Filter => {
                                 st.filter = if inp.is_empty() { None } else { Some(inp.clone()) };
@@ -549,7 +566,7 @@ pub fn run(mut board: Board) -> Result<()> {
                         st.sel = board.tasks.iter().position(|x| x.id == t.id).unwrap_or(0);
                     }
                 };
-                match key.code {
+                match code {
                     KeyCode::Char('q') => break,
                 KeyCode::Esc => {
                     // Esc 不退出（overlay 场景下启动期可能收到类 Esc 事件）：
