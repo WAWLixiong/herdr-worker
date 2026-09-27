@@ -554,6 +554,26 @@ pub fn run(mut board: Board) -> Result<()> {
                     }
                     continue;
                 }
+                // 删除确认态：D 执行删除，其他键取消（并吞掉该键，防误触）
+                if let Some(id) = st.confirm_delete.take() {
+                    if code == KeyCode::Char('D') {
+                        let root = board.root.clone();
+                        match crate::orchestrate::delete_task(&root, id) {
+                            Ok(_) => st.error = None,
+                            Err(e) => {
+                                st.error = Some(e.to_string());
+                                let _ = std::fs::write(
+                                    std::env::temp_dir().join("herdr-worker-debug.log"),
+                                    format!(
+                                        "[{}] delete {id:04} error: {e:?}\n",
+                                        crate::write::utc_now_rfc3339()
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                    continue;
+                }
                 let columns = board.visible_columns();
                 let move_col = |st: &mut UiState, delta: i32| {
                     if columns.is_empty() {
