@@ -36,6 +36,8 @@ pub struct UiState {
     pub input_kind: InputKind,
     /// 建卡后跳选：watcher 重载时消费
     pub select_next: Option<u32>,
+    /// 大写 D 删除确认：Some(id) = 等待对 id 再按一次 D；任何其他键取消
+    pub confirm_delete: Option<u32>,
 }
 
 fn trunc(s: &str, width: usize) -> String {
@@ -71,7 +73,7 @@ fn attempt_badge(att: Option<&crate::model::Attempt>) -> Option<(&'static str, C
     }
 }
 
-fn header_line(board: &Board, error: &Option<String>, filter: &Option<String>, input: &Option<String>, kind: &InputKind) -> Line<'static> {
+fn header_line(board: &Board, error: &Option<String>, filter: &Option<String>, input: &Option<String>, kind: &InputKind, confirm_delete: &Option<u32>) -> Line<'static> {
     let repo = board
         .root
         .parent()
@@ -112,6 +114,13 @@ fn header_line(board: &Board, error: &Option<String>, filter: &Option<String>, i
             Style::new().fg(Color::White).bg(Color::Red).bold(),
         ));
     }
+    if let Some(id) = confirm_delete {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!(" 再按 D 确认删除 {id:04}（其他键取消）"),
+            Style::new().fg(Color::Black).bg(Color::Yellow).bold(),
+        ));
+    }
     Line::from(spans)
 }
 
@@ -143,7 +152,7 @@ fn extract_title_tags(input: &str) -> (String, Vec<String>) {
 
 fn help_line() -> Line<'static> {
     Line::from(Span::styled(
-        " ←→/hjkl 列 · ↑↓/jk 卡 · n 新建 · e 编辑 · s 启动 · r 审过 · f 反馈 · d diff · x 停止 · c 清理 · / 过滤 · H/J/K/L 移卡 · Enter 详情 · q 退出",
+        " ←→/hjkl 列 · ↑↓/jk 卡 · n 新建 · e 编辑 · s 启动 · r 审过 · f 反馈 · d diff · x 停止 · c 清理worktree · D 删除卡 · / 过滤 · H/J/K/L 移卡 · Enter 详情 · q 退出",
         Style::new().fg(Color::DarkGray),
     ))
 }
@@ -290,7 +299,7 @@ pub fn render(f: &mut Frame, board: &Board, st: &UiState) {
         Constraint::Length(1),
     ])
     .split(area);
-    f.render_widget(Paragraph::new(header_line(board, &st.error, &st.filter, &st.input, &st.input_kind)), rows[0]);
+    f.render_widget(Paragraph::new(header_line(board, &st.error, &st.filter, &st.input, &st.input_kind, &st.confirm_delete)), rows[0]);
 
     let columns = board.visible_columns();
     let col_areas = Layout::horizontal(vec![Constraint::Fill(1); columns.len().max(1)])
@@ -465,7 +474,7 @@ pub fn run(mut board: Board) -> Result<()> {
     {
         let _ = std::fs::write(state, pane_id);
     }
-    let mut st = UiState { sel: 0, sel_col: 0, detail: false, error: None, filter: None, input: None, input_kind: InputKind::Filter, select_next: None };
+    let mut st = UiState { sel: 0, sel_col: 0, detail: false, error: None, filter: None, input: None, input_kind: InputKind::Filter, select_next: None, confirm_delete: None };
     // 初始选中：第一张可见卡
     if !board.tasks.is_empty() {
         let cols = board.visible_columns();
@@ -580,6 +589,11 @@ pub fn run(mut board: Board) -> Result<()> {
                     KeyCode::Char('n') => {
                         st.input = Some(String::new());
                         st.input_kind = InputKind::NewTitle;
+                    }
+                    KeyCode::Char('D') => {
+                        if let Some(id) = board.tasks.get(st.sel).map(|t| t.id) {
+                            st.confirm_delete = Some(id);
+                        }
                     }
                 KeyCode::Up | KeyCode::Char('k') => {
                     if st.sel_col < columns.len() {
@@ -717,7 +731,7 @@ mod tests {
 
         let backend = TestBackend::new(160, 30);
         let mut terminal = Terminal::new(backend).unwrap();
-        let st = UiState { sel: 0, sel_col: 1, detail: false, error: None, filter: None, input: None, input_kind: InputKind::Filter, select_next: None };
+        let st = UiState { sel: 0, sel_col: 1, detail: false, error: None, filter: None, input: None, input_kind: InputKind::Filter, select_next: None, confirm_delete: None };
         terminal.draw(|f| render(f, &board, &st)).unwrap();
         let text = buffer_text(terminal.backend().buffer());
         assert!(text.contains("修复登录页偶发白屏"), "看板帧应含任务标题");
@@ -725,7 +739,7 @@ mod tests {
         assert!(text.contains("⛔ blocked"), "看板帧应含 blocked 徽章");
         assert!(text.contains("5k tok"), "看板帧应含用量");
 
-        let st = UiState { sel: 0, sel_col: 1, detail: true, error: None, filter: None, input: None, input_kind: InputKind::Filter, select_next: None };
+        let st = UiState { sel: 0, sel_col: 1, detail: true, error: None, filter: None, input: None, input_kind: InputKind::Filter, select_next: None, confirm_delete: None };
         terminal.draw(|f| render(f, &board, &st)).unwrap();
         let text = buffer_text(terminal.backend().buffer());
         assert!(text.contains("attempts"), "详情帧应含 attempts 区");
@@ -751,7 +765,7 @@ mod tests {
         let board = load_board(&root).unwrap();
         // 选中 0001（order 0 排前）
         let sel = board.tasks.iter().position(|t| t.id == 1).unwrap();
-        let mut st = UiState { sel, sel_col: 0, detail: false, error: None, filter: None, input: None, input_kind: InputKind::Filter, select_next: None };
+        let mut st = UiState { sel, sel_col: 0, detail: false, error: None, filter: None, input: None, input_kind: InputKind::Filter, select_next: None, confirm_delete: None };
 
         // J：列内交换，0001 与 0002 换位，整列 order 归一化
         reorder(&board, &mut st, 1);
@@ -763,7 +777,7 @@ mod tests {
         // L：todo → in-progress（重载后 0001 仍在 todo，order=1 排第二）
         let board = load_board(&root).unwrap();
         let sel = board.tasks.iter().position(|t| t.id == 1).unwrap();
-        let mut st = UiState { sel, sel_col: 0, detail: false, error: None, filter: None, input: None, input_kind: InputKind::Filter, select_next: None };
+        let mut st = UiState { sel, sel_col: 0, detail: false, error: None, filter: None, input: None, input_kind: InputKind::Filter, select_next: None, confirm_delete: None };
         move_to_col(&board, &mut st, 1);
         let src = fs::read_to_string(root.join("tasks").join("0001-alpha").join("task.md")).unwrap();
         assert!(src.contains("status: in-progress"), "应已移入 in-progress：{src}");

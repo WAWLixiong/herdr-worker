@@ -408,6 +408,31 @@ pub fn clean_worktree(board_root: &Path, task_id: u32) -> Result<()> {
     Ok(())
 }
 
+/// D：删除任务（整目录：task.md + attempts + comments；git 里有历史，草稿板则真删）。
+/// 拒绝删除有进行中 attempt 的任务（先 x 停止）。
+pub fn delete_task(board_root: &Path, task_id: u32) -> Result<()> {
+    with_lock(board_root, || {
+        let board = model::load_board(board_root)?;
+        let task = board
+            .tasks
+            .iter()
+            .find(|t| t.id == task_id)
+            .ok_or_else(|| anyhow::anyhow!("任务 {task_id:04} 不存在"))?;
+        if let Some(a) = task.latest_attempt() {
+            if matches!(a.status.as_str(), "running" | "blocked") {
+                bail!("任务 {task_id:04} 有进行中的 attempt #{n}，先按 x 停止再删除", n = a.n);
+            }
+        }
+        let dir = board
+            .root
+            .join("tasks")
+            .join(&task.dir_name);
+        std::fs::remove_dir_all(&dir)
+            .with_context(|| format!("删除 {} 失败", dir.display()))?;
+        Ok(())
+    })
+}
+
 /// e：以 overlay 全屏打开 $EDITOR 编辑选中任务的 task.md（与 d 同构）。
 /// 编辑器进程由 editor 子命令以 argv 直接启动（不经 shell，无引号问题）；
 /// 编辑器退出 → overlay 合拢回板。
@@ -538,6 +563,34 @@ mod tests {
         let board = model::load_board(&root).unwrap();
         assert!(validate_clean(&board, 6).is_err(), "非插件前缀的 worktree 拒绝清理");
 
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn delete_task_guards_and_removes() {
+        let base = std::env::temp_dir().join(format!("herdr-worker-del-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let root = base.join(".herdr-worker");
+        for (name, att_status) in [("0001-done", "done"), ("0002-busy", "running")] {
+            let t = root.join("tasks").join(name);
+            fs::create_dir_all(t.join("attempts")).unwrap();
+            fs::write(
+                t.join("task.md"),
+                format!("---\nid: {}\ntitle: {}\nstatus: done\n---\n正文\n", &name[..4], name),
+            )
+            .unwrap();
+            fs::write(
+                t.join("attempts").join("1.md"),
+                format!("---\nn: 1\nagent: opencode\nbranch: hw/{}\nstatus: {att_status}\n---\n", name),
+            )
+            .unwrap();
+        }
+        // 活 attempt 拒绝
+        assert!(delete_task(&root, 2).is_err());
+        assert!(root.join("tasks").join("0002-busy").exists());
+        // 终态可删
+        delete_task(&root, 1).unwrap();
+        assert!(!root.join("tasks").join("0001-done").exists());
         fs::remove_dir_all(&base).unwrap();
     }
 

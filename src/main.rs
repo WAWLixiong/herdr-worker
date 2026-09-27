@@ -27,7 +27,7 @@ fn main() -> anyhow::Result<()> {
                     .iter()
                     .position(|c| !board.tasks_in(c).is_empty())
                     .unwrap_or(0);
-                let st = tui::UiState { sel: 0, sel_col, detail: false, error: None, filter: None, input: None, input_kind: tui::InputKind::Filter, select_next: None };
+                let st = tui::UiState { sel: 0, sel_col, detail: false, error: None, filter: None, input: None, input_kind: tui::InputKind::Filter, select_next: None, confirm_delete: None };
                 return tui::snapshot(&board, &st, std::path::Path::new(&snap), 150, 36);
             }
             tui::run(board)
