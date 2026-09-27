@@ -424,7 +424,15 @@ pub fn open_editor(board_root: &Path, task_id: u32) -> Result<()> {
                 "vi".to_string()
             }
         });
-    let cmd = format!("{editor} \"{}\"", path.display());
+    // 编辑器路径含空格时给首 token 加引号（"D:\Program Files\...\nvim.exe" 会被
+    // shell 在空格处截断）；带参数写法（code -w）不受影响
+    let editor_cmd = match editor.split_once(' ') {
+        Some((first, rest)) if first.contains('\\') || first.contains('/') => {
+            format!("\"{first}\" {rest}")
+        }
+        _ => editor,
+    };
+    let cmd = format!("{editor_cmd} \"{}\"", path.display());
 
     // 板若以 overlay（放大层）打开：先解除自身放大，编辑器 pane 才可见
     if let Ok(self_pane) = std::env::var("HERDR_PANE_ID") {
